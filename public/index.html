@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAINT Trading</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#05050f;color:#c8d0e8;font-family:'Courier New',monospace;padding:20px;min-height:100vh}
+.header{border-bottom:1px solid #1a1a38;padding-bottom:16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-size:22px;font-weight:700;letter-spacing:6px;color:#e8f0ff}
+.sub{font-size:9px;color:#3a4060;letter-spacing:3px;margin-top:2px}
+.badge{padding:5px 14px;border-radius:20px;font-size:11px;letter-spacing:2px;border:1px solid #ffaa00;color:#ffaa00;background:#ffaa0012}
+.badge.live{border-color:#00ff88;color:#00ff88;background:#00ff8812}
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center}
+.cap{display:flex;align-items:center;gap:8px;background:#080818;border:1px solid #1a1a38;border-radius:8px;padding:6px 14px}
+.cap span{font-size:10px;color:#3a4060}
+.cap input{background:transparent;border:none;color:#e8f0ff;font-size:15px;width:90px;outline:none;font-family:inherit}
+.btn{padding:8px 22px;border-radius:8px;border:1px solid;font-family:inherit;font-size:11px;letter-spacing:2px;cursor:pointer;transition:all 0.2s}
+.btn:disabled{opacity:0.25;cursor:not-allowed}
+.go{color:#00ff88;border-color:#00ff88;background:#00ff8810}
+.stop{color:#ff3355;border-color:#ff3355;background:#ff335510}
+.rst{color:#3a4060;border-color:#1a1a38;background:transparent}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px}
+.stat{background:#080818;border:1px solid #1a1a38;border-radius:10px;padding:14px}
+.slabel{font-size:9px;color:#3a4060;letter-spacing:2px;margin-bottom:8px}
+.sval{font-size:20px;font-weight:700}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+@media(max-width:600px){.two{grid-template-columns:1fr}}
+.panel{background:#080818;border:1px solid #1a1a38;border-radius:10px;padding:16px}
+.ptitle{font-size:9px;color:#3a4060;letter-spacing:2px;margin-bottom:12px}
+.rname{font-size:22px;font-weight:700;margin-bottom:8px}
+.rmeta{font-size:10px;color:#3a4060;line-height:1.8}
+.arow{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.aleft{display:flex;gap:10px;align-items:center}
+.aname{font-size:11px}
+.aconf{font-size:9px;color:#3a4060}
+.aright{display:flex;gap:10px;align-items:center}
+.bwrap{width:80px;height:4px;background:#1a1a38;border-radius:2px}
+.bar{height:100%;border-radius:2px;transition:width 0.6s}
+.aamt{font-size:12px;color:#e8f0ff;min-width:55px;text-align:right}
+.scards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+@media(max-width:600px){.scards{grid-template-columns:1fr}}
+.scard{background:#080818;border-radius:10px;padding:14px;border:1px solid transparent}
+.shead{display:flex;justify-content:space-between;margin-bottom:6px}
+.sdesc{font-size:9px;color:#3a4060;margin-bottom:10px}
+.spnl{font-size:12px;font-weight:600}
+.smeta{font-size:9px;color:#3a4060;margin-top:3px}
+.log{height:190px;overflow-y:auto;font-size:10px;line-height:1.9}
+.le{border-bottom:1px solid #0a0a18}
+.lt{color:#1a2030;margin-right:8px}
+.lw{color:#00cc66}.ll{color:#cc3344}.lr{color:#a080ff}.lc{color:#ff3355}.li{color:#3a4060}
+.alert{display:flex;align-items:center;gap:10px;border-radius:8px;padding:9px 14px;font-size:11px;margin-bottom:8px;border:1px solid}
+.ac{background:#1a000820;border-color:#ff3355;color:#ff3355}
+.aw{background:#1a100020;border-color:#ffaa00;color:#ffaa00}
+.footer{text-align:center;font-size:9px;color:#1a2030;letter-spacing:1px;margin-top:16px}
+</style>
+</head>
+<body>
+<div style="max-width:1300px;margin:0 auto">
+<div class="header">
+  <div><div class="logo">SAINT</div><div class="sub">SELF-ADAPTIVE INTELLIGENT NET TRADING</div></div>
+  <div id="badge" class="badge">○ PAUSED</div>
+</div>
+<div class="controls">
+  <div class="cap"><span>CAPITAL $</span><input type="number" id="capIn" value="250" min="1"></div>
+  <button class="btn go" id="btnGo">▶ INITIALIZE</button>
+  <button class="btn stop" id="btnStop" disabled>■ HALT</button>
+  <button class="btn rst" id="btnRst">↺ RESET</button>
+  <div style="font-size:9px;color:#3a4060;padding:4px 10px;background:#080818;border:1px solid #1a1a38;border-radius:6px">PAPER SIMULATION</div>
+</div>
+<div id="alerts"></div>
+<div class="stats">
+  <div class="stat"><div class="slabel">CAPITAL</div><div class="sval" id="sCap" style="color:#e8f0ff">$250.00</div></div>
+  <div class="stat"><div class="slabel">TOTAL P&L</div><div class="sval" id="sPnl" style="color:#3a4060">$0.000</div></div>
+  <div class="stat"><div class="slabel">DRAWDOWN</div><div class="sval" id="sDD" style="color:#00ff88">0.0%</div></div>
+  <div class="stat"><div class="slabel">WIN RATE</div><div class="sval" id="sWR" style="color:#00ccff">—</div></div>
+  <div class="stat"><div class="slabel">CYCLES</div><div class="sval" id="sCyc" style="color:#a080ff">0</div></div>
+</div>
+<div class="two">
+  <div class="panel" id="rPanel">
+    <div class="ptitle">MARKET REGIME</div>
+    <div class="rname" id="rName" style="color:#00ff88">⚖️ NEUTRAL</div>
+    <div class="rmeta" id="rMeta">Vol: —% | Funding: —%/h | OI Δ: —%</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">CAPITAL ALLOCATION</div>
+    <div class="arow"><div class="aleft"><div class="aname">DNFH</div><div class="aconf" id="cD">—%</div></div><div class="aright"><div class="bwrap"><div class="bar" id="bD" style="width:60%;background:#00ff88"></div></div><div class="aamt" id="aD">$—</div></div></div>
+    <div class="arow"><div class="aleft"><div class="aname">MOMENTUM</div><div class="aconf" id="cM">—%</div></div><div class="aright"><div class="bwrap"><div class="bar" id="bM" style="width:25%;background:#ffaa00"></div></div><div class="aamt" id="aM">$—</div></div></div>
+    <div class="arow"><div class="aleft"><div class="aname">ARB</div><div class="aconf" id="cA">—%</div></div><div class="aright"><div class="bwrap"><div class="bar" id="bA" style="width:15%;background:#00ccff"></div></div><div class="aamt" id="aA">$—</div></div></div>
+  </div>
+</div>
+<div class="scards">
+  <div class="scard" style="border-color:#00ff8822"><div class="shead"><div style="color:#00ff88;font-weight:700">⚖️ DNFH</div><div id="scD" style="color:#00ff88">—%</div></div><div class="sdesc">Delta-Neutral Funding Harvest</div><div class="spnl" id="spD" style="color:#3a4060">$0.000</div><div class="smeta" id="smD">0/0 · —%W</div></div>
+  <div class="scard" style="border-color:#ffaa0022"><div class="shead"><div style="color:#ffaa00;font-weight:700">🚀 MOMENTUM</div><div id="scM" style="color:#ffaa00">—%</div></div><div class="sdesc">Regime-Triggered Trend</div><div class="spnl" id="spM" style="color:#3a4060">$0.000</div><div class="smeta" id="smM">0/0 · —%W</div></div>
+  <div class="scard" style="border-color:#00ccff22"><div class="shead"><div style="color:#00ccff;font-weight:700">🔀 ARB</div><div id="scA" style="color:#00ccff">—%</div></div><div class="sdesc">Cross-Chain Spread Capture</div><div class="spnl" id="spA" style="color:#3a4060">$0.000</div><div class="smeta" id="smA">0/0 · —%W</div></div>
+</div>
+<div class="panel"><div class="ptitle">EXECUTION LOG</div><div class="log" id="log"><div class="le li">Awaiting initialization...</div></div></div>
+<div class="footer">PAPER SIMULATION ONLY — NO REAL FUNDS · SAINT v1.0</div>
+</div>
+<script>
+const R={CRASH:{c:'#ff3355',i:'💀',a:{DNFH:0,MOM:0,ARB:0}},FUNDING_SPIKE:{c:'#ffaa00',i:'⚡',a:{DNFH:.9,MOM:.05,ARB:.05}},HIGH_VOL:{c:'#ff7700',i:'🔥',a:{DNFH:.4,MOM:.4,ARB:.2}},LOW_VOL:{c:'#00ccff',i:'🧊',a:{DNFH:.8,MOM:.1,ARB:.1}},NEUTRAL:{c:'#00ff88',i:'⚖️',a:{DNFH:.6,MOM:.25,ARB:.15}}};
+function dR(v,f,o){if(o<-.15)return'CRASH';if(f>.005)return'FUNDING_SPIKE';if(v>.04)return'HIGH_VOL';if(v<.015)return'LOW_VOL';return'NEUTRAL';}
+function conf(s,r,w,t){const fm={DNFH:{LOW_VOL:.95,NEUTRAL:.8,HIGH_VOL:.6,FUNDING_SPIKE:.98,CRASH:.1},MOM:{LOW_VOL:.3,NEUTRAL:.65,HIGH_VOL:.9,FUNDING_SPIKE:.5,CRASH:.2},ARB:{LOW_VOL:.7,NEUTRAL:.7,HIGH_VOL:.75,FUNDING_SPIKE:.6,CRASH:.5}};const bm={DNFH:.85,MOM:.65,ARB:.78};const wr=t>0?w/t:.6;return Math.min(99,Math.max(1,Math.round((( fm[s]?.[r]??0.5)*.4+wr*.35+(bm[s]??0.65)*.25)*100)));}
+function trade(s,c,a){const w=Math.random()<c/100*.85+.05;const p=w?(s==='DNFH'?.0008+Math.random()*.002:.005+Math.random()*.02):-(0.003+Math.random()*.01);return{won:w,pnl:+(a*p).toFixed(4)};}
+function mkt(p){return{v:Math.max(.005,(p?.v??.025)+(Math.random()-.5)*.005),f:Math.max(-.01,Math.min(.015,(p?.f??.002)+(Math.random()-.5)*.001)),o:(Math.random()-.5)*.12};}
+let S={run:false,cap:250,peak:250,pnl:0,cyc:0,trades:[],mkt:mkt(null),iv:null};
+const $=id=>document.getElementById(id);
+function log(msg,t='i'){const d=document.createElement('div');d.className=`le l${t}`;d.innerHTML=`<span class="lt">${new Date().toLocaleTimeString()}</span>${msg}`;const f=$('log');f.prepend(d);while(f.children.length>80)f.removeChild(f.lastChild);}
+function render(){const{cap,pnl,peak,trades,cyc}=S;const dd=peak>0?Math.max(0,(peak-cap)/peak):0;const ws=trades.filter(t=>t.won).length;$('sCap').textContent='$'+cap.toFixed(2);$('sPnl').textContent=(pnl>=0?'+':'')+' $'+Math.abs(pnl).toFixed(3);$('sPnl').style.color=pnl>=0?'#00ff88':'#ff3355';$('sDD').textContent=(dd*100).toFixed(1)+'%';$('sDD').style.color=dd>.08?'#ff3355':dd>.04?'#ffaa00':'#00ff88';$('sWR').textContent=trades.length>0?(ws/trades.length*100).toFixed(1)+'%':'—';$('sCyc').textContent=cyc;['DNFH','MOM','ARB'].forEach(s=>{const st=trades.filter(t=>t.s===s);const sw=st.filter(t=>t.won).length;const sp=st.reduce((a,t)=>a+t.pnl,0);$('sp'+s[0]).textContent=(sp>=0?'+':'')+' $'+Math.abs(sp).toFixed(3);$('sp'+s[0]).style.color=sp>=0?(s==='DNFH'?'#00ff88':s==='MOM'?'#ffaa00':'#00ccff'):'#ff3355';$('sm'+s[0]).textContent=`${sw}/${st.length} · ${st.length>0?(sw/st.length*100).toFixed(0):'—'}%W`;});}
+function cycle(){S.mkt=mkt(S.mkt);const{v,f,o}=S.mkt;const r=dR(v,f,o);const al=$('alerts');al.innerHTML='';const alerts=[];const dd=S.peak>0?Math.max(0,(S.peak-S.cap)/S.peak):0;if(dd>=.12)alerts.push({l:'c',m:'Max drawdown — positions paused'});if(o<-.2)alerts.push({l:'c',m:'OI crash — emergency exit to USDC'});if(f<-.003)alerts.push({l:'w',m:'Negative funding: flip DNFH direction'});alerts.forEach(a=>{const d=document.createElement('div');d.className='alert '+(a.l==='c'?'ac':'aw');d.textContent=(a.l==='c'?'🚨 ':'⚠️ ')+a.m;al.appendChild(d);});if(alerts.some(a=>a.l==='c')){log('🚨 EMERGENCY HOLD — USDC','c');$('rName').textContent=R[r].i+' '+r;$('rName').style.color=R[r].c;return;}const cs={};['DNFH','MOM','ARB'].forEach(s=>{const rc=S.trades.slice(-10).filter(t=>t.s===s);cs[s]=conf(s,r,rc.filter(t=>t.won).length,rc.length);});$('cD').textContent='conf '+cs.DNFH+'%';$('cM').textContent='conf '+cs.MOM+'%';$('cA').textContent='conf '+cs.ARB+'%';$('scD').textContent=cs.DNFH+'%';$('scM').textContent=cs.MOM+'%';$('scA').textContent=cs.ARB+'%';const alloc=R[r].a;[['DNFH','D'],['MOM','M'],['ARB','A']].forEach(([s,k])=>{const pct=alloc[s]||0;$('b'+k).style.width=Math.max(2,pct*100)+'%';$('a'+k).textContent='$'+(S.cap*pct).toFixed(2);});$('rName').textContent=R[r].i+' '+r;$('rName').style.color=R[r].c;$('rPanel').style.borderColor=R[r].c+'33';$('rMeta').textContent=`Vol: ${(v*100).toFixed(2)}% | Funding: ${(f*100).toFixed(4)}%/h | OI Δ: ${(o*100).toFixed(1)}%`;let cp=0;['DNFH','MOM','ARB'].forEach(s=>{const pct=alloc[s]||0;if(pct<.01)return;const amt=S.cap*pct;if(amt<.5)return;const t=trade(s,cs[s],amt);t.s=s;S.trades.push(t);cp+=t.pnl;log(`${t.won?'✅':'❌'} ${s} | $${amt.toFixed(2)} | ${t.won?'+':''}$${t.pnl.toFixed(3)} | ${cs[s]}%`,t.won?'w':'l');});if(S.trades.length>200)S.trades=S.trades.slice(-200);S.cap=Math.max(0,S.cap+cp);S.pnl=+(S.pnl+cp).toFixed(4);S.peak=Math.max(S.peak,S.cap);S.cyc++;log(`${R[r].i} ${r} | $${S.cap.toFixed(2)} | ${cp>=0?'+':''}$${cp.toFixed(3)}`,'r');render();}
+function start(){const c=parseFloat($('capIn').value);if(!c||c<=0)return;S={...S,cap:c,peak:c,pnl:0,trades:[],cyc:0,run:true};$('capIn').disabled=true;$('btnGo').disabled=true;$('btnStop').disabled=false;$('badge').className='badge live';$('badge').textContent='● LIVE SIM';log(`🚀 SAINT online | $${c} | PAPER`,'r');render();S.iv=setInterval(cycle,2000);}
+function stop(){clearInterval(S.iv);S.run=false;$('btnGo').disabled=false;$('btnStop').disabled=true;$('capIn').disabled=false;$('badge').className='badge';$('badge').textContent='○ PAUSED';log('■ Halted','i');}
+function reset(){stop();const c=parseFloat($('capIn').value)||250;S={run:false,cap:c,peak:c,pnl:0,cyc:0,trades:[],mkt:mkt(null),iv:null};$('log').innerHTML='<div class="le li">Awaiting initialization...</div>';$('alerts').innerHTML='';render();}
+$('btnGo').onclick=start;$('btnStop').onclick=stop;$('btnRst').onclick=reset;
+render();
+</script>
+</body>
+</html>

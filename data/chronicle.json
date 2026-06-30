@@ -1,0 +1,121 @@
+[
+  {
+    "ts": 1782441958894,
+    "type": "AGENT_REGISTERED",
+    "agent": "SOPHIA"
+  },
+  {
+    "ts": 1782441958899,
+    "type": "AGENT_REGISTERED",
+    "agent": "AEGIS"
+  },
+  {
+    "ts": 1782441958900,
+    "type": "AGENT_REGISTERED",
+    "agent": "SAINT"
+  },
+  {
+    "ts": 1782442013238,
+    "type": "AGENT_REGISTERED",
+    "agent": "SOPHIA"
+  },
+  {
+    "ts": 1782442013244,
+    "type": "AGENT_REGISTERED",
+    "agent": "AEGIS"
+  },
+  {
+    "ts": 1782442013244,
+    "type": "AGENT_REGISTERED",
+    "agent": "SAINT"
+  },
+  {
+    "ts": 1782442020691,
+    "type": "TICK",
+    "cycle": 1,
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "SHORT",
+      "confidence": 0.3154293374213807,
+      "cycle": 1
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": false,
+      "risk": "LOW",
+      "reason": "BLOCK",
+      "riskScore": 0.906921252859941,
+      "cycle": 1
+    },
+    "execution": null
+  },
+  {
+    "ts": 1782442020732,
+    "type": "TICK",
+    "cycle": 2,
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "SHORT",
+      "confidence": 0.004447552245709474,
+      "cycle": 2
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": false,
+      "risk": "LOW",
+      "reason": "BLOCK",
+      "riskScore": 0.0961594579901115,
+      "cycle": 2
+    },
+    "execution": null
+  },
+  {
+    "ts": 1782442022197,
+    "type": "TICK",
+    "cycle": 3,
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "HOLD",
+      "confidence": 0.6287992636159856,
+      "cycle": 3
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": false,
+      "risk": "LOW",
+      "reason": "BLOCK",
+      "riskScore": 0.9682806499657474,
+      "cycle": 3
+    },
+    "execution": null
+  },
+  {
+    "ts": 1782442520076,
+    "type": "TICK",
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "SHORT",
+      "confidence": 0.8249449362067025,
+      "cycle": 1
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": true,
+      "risk": "LOW",
+      "reason": "PASS",
+      "riskScore": 0.22899016523047744,
+      "cycle": 1
+    },
+    "execution": {
+      "agent": "SAINT",
+      "action": "EXECUTED",
+      "status": "FILLED",
+      "size": 0.1,
+      "pnl": 0.00433834350951082,
+      "cycle": 1,
+      "confidence": 0.8249449362067025
+    },
+    "mode": "SIMULATION",
+    "cycle": 1
+  }
+]

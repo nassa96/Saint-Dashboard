@@ -1,0 +1,73 @@
+const express = require("express");
+const path = require("path");
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+/**
+ * OMNIVEX-SAINT CORE SERVER (STABLE)
+ * - API layer
+ * - static dashboard hosting
+ * - Render + Termux compatible
+ */
+
+app.use(express.json());
+app.use(express.static(__dirname));
+
+/**
+ * HEALTH CHECK
+ */
+app.get("/api/health", (req, res) => {
+  res.json({
+    system: "OMNIVEX-SAINT",
+    status: "ONLINE",
+    mode: "paper-sim",
+    version: "1.0.1",
+    runtime: "node",
+    timestamp: Date.now()
+  });
+});
+
+/**
+ * SYSTEM STATE (agent topology)
+ */
+app.get("/api/system", (req, res) => {
+  res.json({
+    engine: "OMNIVEX-OS",
+    kernel: "ELOHIM",
+    agents: {
+      execution: "SAINT",
+      intelligence: "SOPHIA",
+      risk: "AEGIS",
+      routing: "AURIN"
+    },
+    pipeline: [
+      "INGEST",
+      "NORMALIZE",
+      "SIGNAL",
+      "DECIDE",
+      "EXECUTE",
+      "VERIFY",
+      "LEARN"
+    ],
+    mode: "SIMULATION"
+  });
+});
+
+/**
+ * ROOT → DASHBOARD
+ */
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+
+/**
+ * START SERVER
+ */
+app.listen(PORT, () => {
+  console.log("=================================");
+  console.log("OMNIVEX-SAINT CORE ONLINE");
+  console.log("PORT:", PORT);
+  console.log("HEALTH: /api/health");
+  console.log("=================================");
+});

@@ -1,0 +1,59 @@
+[
+  {
+    "type": "AGENT_REGISTERED",
+    "agent": "SOPHIA",
+    "ts": 1782442295048
+  },
+  {
+    "type": "AGENT_REGISTERED",
+    "agent": "AEGIS",
+    "ts": 1782442295065
+  },
+  {
+    "type": "AGENT_REGISTERED",
+    "agent": "SAINT",
+    "ts": 1782442295066
+  },
+  {
+    "type": "AGENT_REGISTERED",
+    "agent": "SOPHIA",
+    "ts": 1782442383203
+  },
+  {
+    "type": "AGENT_REGISTERED",
+    "agent": "AEGIS",
+    "ts": 1782442383212
+  },
+  {
+    "type": "AGENT_REGISTERED",
+    "agent": "SAINT",
+    "ts": 1782442383213
+  },
+  {
+    "type": "TICK",
+    "cycle": 1,
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "SHORT",
+      "confidence": 0.259457056496311,
+      "cycle": 1
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": true,
+      "risk": "LOW",
+      "reason": "PASS",
+      "riskScore": 0.8083283434262776,
+      "cycle": 1
+    },
+    "execution": {
+      "agent": "SAINT",
+      "action": "EXECUTED",
+      "status": "FILLED",
+      "size": 0.1,
+      "confidence": 0.259457056496311,
+      "cycle": 1
+    },
+    "ts": 1782442392630
+  }
+]

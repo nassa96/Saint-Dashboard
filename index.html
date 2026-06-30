@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMNIVEX OS - SAINT CORE</title>
+
+<style>
+body {
+  margin:0;
+  font-family: monospace;
+  background:#050505;
+  color:#d6e0ff;
+}
+
+.header {
+  padding:20px;
+  border-bottom:1px solid #1f1f3a;
+  display:flex;
+  justify-content:space-between;
+}
+
+.title {
+  font-size:18px;
+  letter-spacing:3px;
+  color:#00ff99;
+}
+
+.status {
+  padding:6px 12px;
+  border:1px solid #00ff99;
+  color:#00ff99;
+  border-radius:8px;
+}
+
+.panel {
+  padding:20px;
+}
+
+.card {
+  background:#0f1115;
+  border:1px solid #1f1f3a;
+  padding:15px;
+  border-radius:10px;
+  margin-bottom:10px;
+}
+
+.metric {
+  font-size:14px;
+  margin:5px 0;
+}
+
+button {
+  background:#00ff99;
+  border:none;
+  padding:10px 14px;
+  cursor:pointer;
+  margin-top:10px;
+  font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <div class="title">OMNIVEX OS :: SAINT CORE</div>
+  <div id="status" class="status">OFFLINE</div>
+</div>
+
+<div class="panel">
+
+  <div class="card">
+    <div class="metric">System: <span id="sys">...</span></div>
+    <div class="metric">Mode: <span id="mode">...</span></div>
+    <div class="metric">Version: <span id="ver">...</span></div>
+    <div class="metric">Timestamp: <span id="time">...</span></div>
+
+    <button onclick="load()">SYNC SYSTEM</button>
+  </div>
+
+</div>
+
+<script>
+async function load() {
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+
+    document.getElementById('sys').innerText = data.system;
+    document.getElementById('mode').innerText = data.mode;
+    document.getElementById('ver').innerText = data.version;
+    document.getElementById('time').innerText = data.timestamp;
+
+    document.getElementById('status').innerText = "LIVE";
+    document.getElementById('status').style.borderColor = "#00ff99";
+
+  } catch (e) {
+    document.getElementById('status').innerText = "ERROR";
+    document.getElementById('status').style.borderColor = "#ff3355";
+  }
+}
+
+load();
+</script>
+
+</body>
+</html>

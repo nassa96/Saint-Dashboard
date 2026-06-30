@@ -1,0 +1,148 @@
+[
+  {
+    "ts": 1782445724140,
+    "cycle": 1,
+    "price": 59611.665,
+    "regime": "LOW_VOL",
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "SHORT",
+      "confidence": 0.0736100892739413,
+      "genomeId": "C",
+      "price": 59611.665,
+      "cycle": 1
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": false,
+      "risk": "BLOCK",
+      "riskScore": 0.8844937708887567,
+      "regime": "LOW_VOL"
+    },
+    "execution": null,
+    "equity": 100
+  },
+  {
+    "ts": 1782460218002,
+    "type": "TICK",
+    "price": 60516.13,
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "SHORT",
+      "confidence": 0.821590206602862,
+      "price": 60516.13,
+      "cycle": 1
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": true,
+      "risk": "LOW",
+      "riskScore": 0.5943992671680671,
+      "regime": "LIVE_SIM",
+      "cycle": 1
+    },
+    "execution": {
+      "agent": "SAINT",
+      "action": "EXECUTED",
+      "status": "FILLED",
+      "size": 0.1,
+      "pnl": 0.0017274941566030172,
+      "confidence": 0.821590206602862,
+      "cycle": 1
+    },
+    "cycle": 1
+  },
+  {
+    "ts": 1782460694368,
+    "type": "TICK",
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "HOLD",
+      "confidence": 0.5,
+      "price": 60462.535,
+      "cycle": 1,
+      "genomeId": "C"
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": true,
+      "risk": "LOW",
+      "riskScore": 0.37121973768967576,
+      "regime": "LIVE_SIM",
+      "cycle": 1
+    },
+    "execution": {
+      "agent": "SAINT",
+      "action": "EXECUTED",
+      "status": "FILLED",
+      "size": 0.1,
+      "pnl": 0.00249848573166948,
+      "confidence": 0.5,
+      "cycle": 1
+    },
+    "price": 60462.535,
+    "cycle": 1,
+    "equity": 100.00249848573166
+  },
+  {
+    "ts": 1782460752741,
+    "type": "TICK",
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "LONG",
+      "confidence": 0.9118083865525495,
+      "price": 60482.52,
+      "cycle": 1
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": false,
+      "risk": "BLOCK",
+      "riskScore": 0.8731919235833459,
+      "regime": "LIVE_SIM",
+      "cycle": 1
+    },
+    "execution": null,
+    "price": 60482.52,
+    "cycle": 1,
+    "equity": 100
+  },
+  {
+    "ts": 1782461302960,
+    "cycle": 1,
+    "market": {
+      "price": 60174.65,
+      "source": "coinbase",
+      "ts": 1782461302957
+    },
+    "signal": {
+      "agent": "SOPHIA",
+      "signal": "HOLD",
+      "confidence": 0.5,
+      "price": 50000,
+      "cycle": 1
+    },
+    "risk": {
+      "agent": "AEGIS",
+      "approved": true,
+      "risk": "LOW",
+      "riskScore": 0.11239510213433734,
+      "regime": "LIVE_SIM",
+      "cycle": 1
+    },
+    "execution": {
+      "agent": "SAINT",
+      "action": "EXECUTED",
+      "status": "FILLED",
+      "size": 0.1,
+      "pnl": -0.0024058152780289527,
+      "confidence": 0.5,
+      "cycle": 1
+    },
+    "capital": {
+      "equity": 99.99759418472198,
+      "peak": 100,
+      "drawdown": 0.000024058152780241928
+    }
+  }
+]

@@ -84,7 +84,8 @@
       </div>
     </div>
     <div class="badges" id="badges"></div>
-    <div style="display:flex;gap:8px">
+    <div style="display:flex;gap:8px;align-items:center">
+      <a class="mini-btn" href="/analytics.html" style="text-decoration:none">📊 Analytics</a>
       <button class="mini-btn" onclick="testAlert()">Test Alert</button>
       <button class="mini-btn danger" onclick="resetBook()">Reset Book</button>
       <button class="mini-btn" id="logout-btn" onclick="logout()" style="display:none">Logout</button>
@@ -110,8 +111,8 @@
     </div>
 
     <!-- Signals -->
-    <div class="card span7"><h3>Strategy Signals <span class="mini">EMA · RSI · MACD · Momentum</span></h3>
-      <table><thead><tr><th>Asset</th><th>Signal</th><th>Score</th><th>Conf</th><th>RSI</th><th>Target</th></tr></thead>
+    <div class="card span7"><h3>Strategy Signals <span class="mini">per-symbol routed strategy</span></h3>
+      <table><thead><tr><th>Asset</th><th>Strategy</th><th>Signal</th><th>Score</th><th>Conf</th><th>RSI</th><th>Target</th></tr></thead>
       <tbody id="signals"></tbody></table>
     </div>
 
@@ -233,6 +234,7 @@ function render(d){
     const t=s.signal.toLowerCase();
     const target=d.targets[s.symbol]?((d.targets[s.symbol]*100).toFixed(1)+"%"):"—";
     return `<tr><td>${s.symbol}</td>
+      <td class="mini mut">${s.strategy||'—'}</td>
       <td><span class="tag t-${t}">${s.signal}</span></td>
       <td class="${cls(s.score)}">${fmt(s.score,2)}</td>
       <td><div class="bar"><i style="width:${Math.round((s.confidence||0)*100)}%"></i></div><span class="mini">${(s.confidence*100).toFixed(0)}%</span></td>

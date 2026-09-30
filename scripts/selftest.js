@@ -168,6 +168,65 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(wf.folds >= 2 && wf.summary && typeof wf.summary.avgOOSReturnPct === "number", "walk-forward produces OOS summary");
   ok("optimizer grid search + walk-forward validation work");
 
+  // per-symbol strategy routing
+  const routeCfg = require("../config");
+  const savedRoutes = routeCfg.strategyRoutes;
+  const savedMajors = routeCfg.majors, savedMajStrat = routeCfg.majorsStrategy, savedAltStrat = routeCfg.altsStrategy;
+  routeCfg.strategyRoutes = { "BTC-USD": "meanreversion" };
+  routeCfg.majors = ["ETH-USD"];
+  routeCfg.majorsStrategy = "momentum";
+  routeCfg.altsStrategy = "meanreversion";
+  assert(routeCfg.resolveStrategy("BTC-USD") === "meanreversion", "explicit route wins over major/alt split");
+  assert(routeCfg.resolveStrategy("ETH-USD") === "momentum", "major falls through to majorsStrategy");
+  assert(routeCfg.resolveStrategy("SOL-USD") === "meanreversion", "non-major falls through to altsStrategy");
+  routeCfg.strategyRoutes = savedRoutes; routeCfg.majors = savedMajors;
+  routeCfg.majorsStrategy = savedMajStrat; routeCfg.altsStrategy = savedAltStrat;
+  ok("per-symbol strategy routing resolves route→majors/alts→default");
+
+  // param store roundtrip + facade apply
+  const paramStore = require("../src/signals/paramStore");
+  // (fs2 already required above)
+  try { fs2.unlinkSync(paramStore.STORE_PATH); } catch {}
+  paramStore.setBest("momentum", { lookback: 42, threshold: 0.9 }, { fitness: 1.23 });
+  const reloaded = paramStore.getBest("momentum");
+  assert(reloaded && reloaded.params.lookback === 42, "paramStore persists + reloads best params");
+  sfacade.loadSavedParams();
+  assert(sfacade.getParams("momentum").lookback === 42, "facade loads saved params on boot");
+  const applied = sfacade.evaluate(up, { strategy: "momentum" });
+  assert(applied && typeof applied.score === "number", "facade evaluates with saved params applied");
+  try { fs2.unlinkSync(paramStore.STORE_PATH); } catch {}
+  sfacade.setParams("momentum", {}); // clear override
+  ok("optimizer param persistence: save → reload → auto-apply");
+
+  // broker trade ledger (journal)
+  const Broker = require("../src/paper/broker");
+  const jb = new Broker({ capital: { startingEquity: 10000 } }, { persist: false });
+  jb.slippageRate = 0; // deterministic fills for the test
+  jb.execute({ symbol: "BTC-USD", side: "BUY", notional: 1000, price: 100 });  // open @100
+  jb.execute({ symbol: "BTC-USD", side: "SELL", notional: 1100, price: 110 }); // close @110 → profit
+  assert(jb.trades.length === 1, "SELL records one closed trade");
+  const tr = jb.trades[0];
+  assert(tr.symbol === "BTC-USD" && tr.pnl > 0 && tr.pnlPct > 0, "closed trade has positive pnl + pnlPct");
+  assert(typeof tr.holdMs === "number" && tr.entryPrice === 100 && tr.exitPrice === 110, "trade captures entry/exit/hold");
+  ok("broker trade ledger records round-trip trades");
+
+  // analytics
+  const analytics = require("../src/analytics/analytics");
+  const stats = analytics.compute(
+    [
+      { pnl: 50, pnlPct: 5, symbol: "BTC-USD", holdMs: 60000 },
+      { pnl: -20, pnlPct: -2, symbol: "ETH-USD", holdMs: 120000 },
+      { pnl: 30, pnlPct: 3, symbol: "BTC-USD", holdMs: 90000 },
+    ],
+    [{ equity: 10000 }, { equity: 10050 }, { equity: 10030 }, { equity: 10060 }],
+    10000
+  );
+  assert(stats.totalTrades === 3 && stats.wins === 2 && stats.losses === 1, "analytics counts wins/losses");
+  assert(Math.abs(stats.netPnl - 60) < 1e-6, "analytics net PnL correct");
+  assert(Math.abs(stats.profitFactor - 4) < 1e-6, "analytics profit factor = grossWin/grossLoss");
+  assert(stats.symbolStats.length === 2 && stats.distribution.length === 8, "analytics symbol breakdown + distribution");
+  ok("analytics computes win rate, profit factor, expectancy, distribution");
+
   console.log(`\nALL TESTS PASSED (${passed} checks) ✅`);
   process.exit(0);
 })().catch((e) => {

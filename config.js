@@ -90,6 +90,21 @@ const config = {
   strategy: (process.env.STRATEGY || "momentum").toLowerCase(),
   ensembleMembers: list(process.env.ENSEMBLE_MEMBERS, ["momentum", "meanreversion"]),
 
+  // Per-symbol strategy routing. Explicit map wins; otherwise majors vs alts.
+  // SYMBOL_STRATEGIES="BTC-USD:momentum,SOL-USD:meanreversion"
+  strategyRoutes: (function () {
+    const raw = process.env.SYMBOL_STRATEGIES || "";
+    const out = {};
+    for (const pair of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
+      const [sym, strat] = pair.split(":").map((s) => s.trim());
+      if (sym && strat) out[sym.toUpperCase()] = strat.toLowerCase();
+    }
+    return out;
+  })(),
+  majors: list(process.env.MAJORS, ["BTC-USD", "ETH-USD"]),
+  majorsStrategy: (process.env.STRATEGY_MAJORS || "").toLowerCase(),
+  altsStrategy: (process.env.STRATEGY_ALTS || "").toLowerCase(),
+
   exchanges: {
     primary: (process.env.PRIMARY_EXCHANGE || "coinbase").toLowerCase(),
     binanceus: {
@@ -148,6 +163,19 @@ config.canTradeLive = function canTradeLive() {
  */
 config.canSwapOnchain = function canSwapOnchain() {
   return config.canTradeLive() && config.wallet.onchainEnabled === true;
+};
+
+/**
+ * Resolve which strategy should evaluate a given symbol.
+ * Priority: explicit route -> majors/alts split -> global default.
+ */
+config.resolveStrategy = function resolveStrategy(symbol) {
+  const s = (symbol || "").toUpperCase();
+  if (config.strategyRoutes[s]) return config.strategyRoutes[s];
+  const isMajor = config.majors.map((m) => m.toUpperCase()).includes(s);
+  if (isMajor && config.majorsStrategy) return config.majorsStrategy;
+  if (!isMajor && config.altsStrategy) return config.altsStrategy;
+  return config.strategy;
 };
 
 module.exports = config;

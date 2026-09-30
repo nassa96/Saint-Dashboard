@@ -34,6 +34,11 @@ class Engine {
 
     // Activate the configured signal strategy (momentum | meanreversion | ensemble)
     strategy.configure({ strategy: config.strategy, ensembleMembers: config.ensembleMembers });
+    // Auto-load optimizer-saved best params so the live engine uses tuned settings
+    const savedParams = strategy.loadSavedParams();
+    if (Object.keys(savedParams).length) {
+      log.info("ENGINE", `Loaded tuned params for: ${Object.keys(savedParams).join(", ")}`);
+    }
 
     this.cycle = 0;
     this.running = false;
@@ -87,11 +92,12 @@ class Engine {
     await this.market.refresh();
     const prices = this.prices();
 
-    // 1) Evaluate every symbol with the REAL strategy
+    // 1) Evaluate every symbol with its ROUTED strategy (per-symbol/per-strategy)
     const evaluations = this.config.universe.map((symbol) => {
       const series = this.market.getPrices(symbol);
-      const evalResult = strategy.evaluate(series);
-      return { symbol, price: prices[symbol]?.price || null, ...evalResult };
+      const stratName = this.config.resolveStrategy(symbol);
+      const evalResult = strategy.evaluate(series, { strategy: stratName });
+      return { symbol, price: prices[symbol]?.price || null, strategy: stratName, ...evalResult };
     });
     this.lastEvaluations = evaluations;
 
@@ -259,12 +265,18 @@ class Engine {
         active: this.config.strategy,
         ensembleMembers: this.config.ensembleMembers,
         available: strategy.registry.list(),
+        routes: this.config.universe.reduce((acc, s) => {
+          acc[s] = this.config.resolveStrategy(s);
+          return acc;
+        }, {}),
+        tunedParams: strategy.activeParams(),
       },
       market: this.market.snapshot(),
       signals: this.lastEvaluations.map((e) => ({
         symbol: e.symbol,
         price: e.price,
         signal: e.signal,
+        strategy: e.strategy,
         confidence: Number((e.confidence || 0).toFixed(3)),
         score: Number((e.score || 0).toFixed(3)),
         rsi: e.indicators?.rsi != null ? Number(e.indicators.rsi.toFixed(1)) : null,

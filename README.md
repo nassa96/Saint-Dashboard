@@ -34,7 +34,9 @@ v2 replaces that core with real, working machinery:
 | Persistence | in-memory only | Paper portfolio saved to `data/portfolio.json`, restored on restart |
 | Alerts | none | Telegram + Discord alerts on fills & high-score memecoins (`src/alerts`) |
 | Strategies | 1 fixed | Pluggable registry: momentum, mean-reversion, ensemble (`src/signals/strategies`) |
-| Optimization | none | Grid search + walk-forward validation (`src/backtest/optimizer.js`) |
+| Optimization | none | Grid search + walk-forward validation, results persisted & auto-applied (`src/backtest/optimizer.js`, `src/signals/paramStore.js`) |
+| Strategy routing | 1 global | Per-symbol / per-strategy routing — momentum on majors, mean-reversion on alts, simultaneously (`config.resolveStrategy`) |
+| Journal & analytics | none | Closed-trade journal + analytics page: win rate, profit factor, expectancy, drawdown, PnL distribution (`src/analytics`, `/analytics.html`) |
 | CI | none | GitHub Actions: self-test on Node 18/20/22 + boot smoke test (`ci/`, see `ci/README.md`) |
 
 ### LIVE vs SIM labeling
@@ -74,6 +76,7 @@ server.js ──► src/engine/engine.js  (the loop)
                  ├─ src/market/marketData.js   real prices + candle warm-up (LIVE/SIM)
                  ├─ src/signals/strategy.js     facade -> strategies/ registry
                  │     └─ strategies/ momentum · meanReversion · ensemble
+                 │     └─ paramStore.js         persists tuned params (auto-applied)
                  ├─ src/risk/riskManager.js     caps, exposure, drawdown breaker
                  ├─ src/portfolio/allocator.js  conviction-weighted rotation targets
                  ├─ src/paper/broker.js         simulated fills @ real prices (default)
@@ -83,8 +86,10 @@ server.js ──► src/engine/engine.js  (the loop)
                  │     ├─ solana.js (Jupiter)   evm.js (0x: eth/base/bsc)
                  ├─ src/backtest/backtester.js  replay strategy over history
                  ├─ src/backtest/optimizer.js   grid search + walk-forward
+                 ├─ src/analytics/analytics.js  journal stats: win rate, PF, expectancy
                  └─ src/memecoin/scanner.js     DexScreener detection + scoring
-public/index.html ── live dashboard over /ws (WebSocket)
+public/index.html ──── live dashboard over /ws (WebSocket)
+public/analytics.html ─ trade journal & performance analytics
 ```
 
 ### REST API
@@ -98,8 +103,11 @@ public/index.html ── live dashboard over /ws (WebSocket)
 - `POST /api/wallet/swap` — **gated** real swap (refused unless armed)
 - `POST /api/backtest` — backtest the strategy `{bars, granularity}`
 - `GET  /api/strategies` — list available strategies + active one
-- `POST /api/optimize` — grid-search a strategy's params `{strategy, bars}`
+- `POST /api/optimize` — grid-search a strategy's params `{strategy, bars, apply?}` (best params are persisted + applied live unless `apply:false`)
 - `POST /api/walkforward` — walk-forward validation `{strategy, bars, folds}`
+- `GET  /api/journal?limit=100` — closed round-trip trade journal
+- `GET  /api/analytics` — performance analytics (win rate, profit factor, expectancy, distribution)
+- `GET  /api/params` — active tuned params + persisted param store
 - `POST /api/login` `/api/logout` · `GET /api/auth/status` — dashboard auth
 - `GET  /api/alerts/status` · `POST /api/alerts/test` — notification channels
 - `POST /api/portfolio/reset` — reset paper book (clears persisted state)
@@ -119,6 +127,32 @@ params)`, `defaultParams`, and a `paramSpace` the optimizer sweeps.
 
 Both are also available in the dashboard's **Strategy Optimizer** panel and via
 `/api/optimize` + `/api/walkforward`.
+
+**Persisted results** — when you optimize (CLI or dashboard), the best params are
+written to `data/strategy_params.json` and applied to the running engine
+immediately. On the next boot the engine auto-loads them (see the
+`[ENGINE] Loaded tuned params for …` log line), so a tuned edge survives restarts.
+
+### Per-symbol strategy routing
+Run different strategies on different assets at the same time. Resolution order
+per symbol is **explicit route → majors/alts split → global `STRATEGY`**:
+
+```
+SYMBOL_STRATEGIES=BTC-USD:momentum,SOL-USD:meanreversion   # explicit wins
+MAJORS=BTC-USD,ETH-USD                                       # who counts as a major
+STRATEGY_MAJORS=momentum                                     # applied to majors
+STRATEGY_ALTS=meanreversion                                  # applied to everything else
+```
+
+The dashboard's Signals table shows the routed strategy per asset, and the
+snapshot exposes `strategy.routes` + `strategy.tunedParams`.
+
+### Trade journal & analytics
+Every closed round-trip trade is recorded in the broker's ledger (persisted in
+`data/portfolio.json`). The **📊 Analytics** page (`/analytics.html`, linked from
+the header) shows net PnL, win rate, profit factor, expectancy, avg win/loss,
+max drawdown, average hold time, a per-symbol breakdown, a PnL-% distribution and
+a cumulative realized-PnL curve — all from `/api/journal` + `/api/analytics`.
 
 ### Authentication
 Auth turns on automatically once `DASHBOARD_PASSWORD` is set. It protects all

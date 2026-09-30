@@ -15,6 +15,8 @@ const Engine = require("./src/engine/engine");
 const Backtester = require("./src/backtest/backtester");
 const Optimizer = require("./src/backtest/optimizer");
 const { buildSeries } = require("./src/backtest/history");
+const analytics = require("./src/analytics/analytics");
+const strategyFacade = require("./src/signals/strategy");
 const Auth = require("./src/auth/auth");
 const log = require("./src/util/logger");
 
@@ -124,7 +126,8 @@ app.get("/api/strategies", (req, res) => {
   res.json({ active: config.strategy, ensembleMembers: config.ensembleMembers, available: registry.list() });
 });
 
-// Optimize a strategy's parameters (grid search)
+// Optimize a strategy's parameters (grid search). Persists + applies best
+// params to the live engine unless {apply:false}.
 app.post("/api/optimize", async (req, res) => {
   try {
     const strategy = (req.body?.strategy || config.strategy || "momentum").toLowerCase();
@@ -132,10 +135,34 @@ app.post("/api/optimize", async (req, res) => {
     const { series, source, bars: n } = await buildSeries(config.universe, bars, Number(req.body?.granularity || 3600));
     const opt = new Optimizer(config);
     const result = opt.gridSearch(series, strategy, {});
-    res.json({ ...result, source, bars: n });
+    let applied = false;
+    if (result.best && req.body?.apply !== false) {
+      strategyFacade.paramStore.setBest(strategy, result.best.params, {
+        source, bars: n, fitness: result.best.fitness, method: "gridSearch",
+      });
+      strategyFacade.setParams(strategy, result.best.params);
+      applied = true;
+    }
+    res.json({ ...result, source, bars: n, applied });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// Trade journal (closed round-trip trades)
+app.get("/api/journal", (req, res) => {
+  const n = Math.min(500, Math.max(1, Number(req.query.limit || 100)));
+  res.json({ count: engine.paper.trades.length, trades: engine.paper.trades.slice(-n).reverse() });
+});
+
+// Analytics computed from the journal + equity curve
+app.get("/api/analytics", (req, res) => {
+  res.json(analytics.compute(engine.paper.trades, engine.paper.equityCurve, engine.paper.startingEquity));
+});
+
+// Currently-active tuned params + saved param store
+app.get("/api/params", (req, res) => {
+  res.json({ active: strategyFacade.activeParams(), stored: strategyFacade.paramStore.load() });
 });
 
 // Walk-forward validation (guards against curve-fitting)

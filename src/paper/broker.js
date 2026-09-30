@@ -21,6 +21,7 @@ class PaperBroker {
     this.slippageRate = 0.0005; // 5 bps
     this.equityCurve = [{ ts: Date.now(), equity: this.startingEquity }];
     this.realizedPnl = 0;
+    this.trades = []; // closed round-trip trades (journal)
     this._saveTimer = null;
     this._persistEnabled = opts.persist !== false;
     this._storePath = opts.storePath || DEFAULT_STORE;
@@ -35,6 +36,7 @@ class PaperBroker {
         this.cash = s.cash;
         this.positions = s.positions || {};
         this.fills = Array.isArray(s.fills) ? s.fills : [];
+        this.trades = Array.isArray(s.trades) ? s.trades : [];
         this.equityCurve = Array.isArray(s.equityCurve) && s.equityCurve.length
           ? s.equityCurve
           : this.equityCurve;
@@ -61,6 +63,7 @@ class PaperBroker {
           cash: this.cash,
           positions: this.positions,
           realizedPnl: this.realizedPnl,
+          trades: this.trades.slice(-500),
           fills: this.fills.slice(-200),
           equityCurve: this.equityCurve.slice(-500),
           savedAt: Date.now(),
@@ -76,6 +79,7 @@ class PaperBroker {
   reset() {
     this.cash = this.startingEquity;
     this.positions = {};
+    this.trades = [];
     this.fills = [];
     this.realizedPnl = 0;
     this.equityCurve = [{ ts: Date.now(), equity: this.startingEquity }];
@@ -130,15 +134,34 @@ class PaperBroker {
       }
       const newQty = pos.qty + qty;
       pos.avgPrice = newQty > 0 ? (pos.avgPrice * pos.qty + fillPrice * qty) / newQty : fillPrice;
+      if (pos.qty <= 1e-10) pos.openedTs = Date.now(); // new position opened
       pos.qty = newQty;
       this.cash -= notional + fee;
     } else {
       const sellQty = Math.min(pos.qty, qty);
       if (sellQty <= 0) return null;
       const proceeds = sellQty * fillPrice - fee;
-      this.realizedPnl += sellQty * (fillPrice - pos.avgPrice) - fee;
+      const pnl = sellQty * (fillPrice - pos.avgPrice) - fee;
+      this.realizedPnl += pnl;
       pos.qty -= sellQty;
       this.cash += proceeds;
+      // record closed round-trip trade for the journal
+      const openedTs = pos.openedTs || Date.now();
+      const trade = {
+        ts: Date.now(),
+        symbol,
+        entryPrice: Number(pos.avgPrice.toFixed(6)),
+        exitPrice: Number(fillPrice.toFixed(6)),
+        qty: Number(sellQty.toFixed(8)),
+        notional: Number((sellQty * fillPrice).toFixed(2)),
+        pnl: Number(pnl.toFixed(2)),
+        pnlPct: pos.avgPrice > 0 ? Number((((fillPrice - pos.avgPrice) / pos.avgPrice) * 100).toFixed(2)) : 0,
+        fee: Number(fee.toFixed(4)),
+        openedTs,
+        holdMs: Date.now() - openedTs,
+      };
+      this.trades.push(trade);
+      if (this.trades.length > 1000) this.trades.shift();
     }
 
     if (pos.qty <= 1e-10) delete this.positions[symbol];

@@ -6,3 +6,4 @@ data/*.json.bak
 .DS_Store
 data/chronicle.json
 data/portfolio.json
+data/strategy_params.json

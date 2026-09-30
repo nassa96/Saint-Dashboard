@@ -75,6 +75,9 @@ const config = {
     maxDailyDrawdownPct: num(process.env.MAX_DAILY_DRAWDOWN_PCT, 0.1),
     perTradeRiskPct: num(process.env.PER_TRADE_RISK_PCT, 0.02),
     minSignalConfidence: num(process.env.MIN_SIGNAL_CONFIDENCE, 0.55),
+    // Fee-aware floor: never place a trade smaller than this many USD.
+    // Tiny trades get devoured by fees + exchange minimums. Default $10.
+    minTradeUsd: num(process.env.MIN_TRADE_USD, 10),
   },
 
   universe: list(process.env.TRADE_UNIVERSE, [
@@ -104,6 +107,14 @@ const config = {
   majors: list(process.env.MAJORS, ["BTC-USD", "ETH-USD"]),
   majorsStrategy: (process.env.STRATEGY_MAJORS || "").toLowerCase(),
   altsStrategy: (process.env.STRATEGY_ALTS || "").toLowerCase(),
+
+  // Published entry-tier spot fees (maker/taker %, base-tier, 2025-2026).
+  // Used for fee-aware sizing + the venue comparison in the dashboard.
+  venueFees: {
+    coinbase: { maker: 0.40, taker: 0.60, label: "Coinbase Advanced" },
+    binanceus: { maker: 0.10, taker: 0.10, label: "Binance.US" },
+    kraken: { maker: 0.40, taker: 0.80, label: "Kraken Pro" },
+  },
 
   exchanges: {
     primary: (process.env.PRIMARY_EXCHANGE || "coinbase").toLowerCase(),
@@ -149,6 +160,15 @@ const config = {
  * The single source of truth for "are we allowed to send a real order?"
  * ALL three conditions must be true. Defense in depth.
  */
+/**
+ * Worst-case round-trip fee % for a venue (taker in + taker out).
+ * A strategy must clear this on every trade just to break even.
+ */
+config.roundTripFeePct = function roundTripFeePct(venue) {
+  const f = config.venueFees[(venue || config.exchanges.primary || "coinbase").toLowerCase()];
+  return f ? (f.taker * 2) : 1.2;
+};
+
 config.canTradeLive = function canTradeLive() {
   return (
     config.mode === "LIVE" &&

@@ -54,6 +54,28 @@ class ExchangeManager {
   }
 
   /**
+   * Aggregated balances across EVERY configured venue at once — the
+   * multi-venue view. Venues without keys are reported, not failed.
+   */
+  async getAllBalances() {
+    const out = {};
+    await Promise.all(
+      Object.entries(this.venues).map(async ([name, v]) => {
+        if (!v.hasCredentials()) {
+          out[name] = { venue: name, balances: [], note: "no API keys configured" };
+          return;
+        }
+        try {
+          out[name] = await v.getBalances();
+        } catch (e) {
+          out[name] = { venue: name, balances: [], error: e.message };
+        }
+      })
+    );
+    return { venues: out, fees: this.config.venueFees };
+  }
+
+  /**
    * The one and only path to a real order. Refuses unless the
    * global kill-switch is fully disengaged.
    */
@@ -75,10 +97,15 @@ class ExchangeManager {
       primary: this.primary,
       useTestnet: this.config.useTestnet,
       canTradeLive: this.config.canTradeLive(),
+      fees: this.config.venueFees,
       venues: Object.fromEntries(
         Object.entries(this.venues).map(([k, v]) => [
           k,
-          { hasCredentials: v.hasCredentials(), ...(this.status[k] || {}) },
+          {
+            hasCredentials: v.hasCredentials(),
+            fees: this.config.venueFees[k] || null,
+            ...(this.status[k] || {}),
+          },
         ])
       ),
     };

@@ -103,6 +103,15 @@ app.get("/api/exchanges/balances", async (req, res) => {
   }
 });
 
+// Aggregated balances across ALL venues at once (the multi-venue view)
+app.get("/api/exchanges/balances/all", async (req, res) => {
+  try {
+    res.json(await engine.exchanges.getAllBalances());
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Backtest the live strategy over historical data
 let _btCache = null;
 app.post("/api/backtest", async (req, res) => {

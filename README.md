@@ -62,6 +62,9 @@ npm run backtest          # backtest the strategy (real candles when online)
 > 💰 **Going live with real money? Start with [`LAUNCH.md`](LAUNCH.md)** — a staged
 > runbook (validate → paper → tiny live → scale) with risk presets in `presets/`
 > and a pre-flight checklist. It's built to keep you from blowing up.
+>
+> 🌐 **Running across multiple exchanges?** See [`VENUES.md`](VENUES.md) — venue
+> fees, aggregated balances, fee-aware sizing, and how to add new venues.
 
 For 24/7 hosting (Docker / VPS / systemd) see **`DEPLOY.md`**:
 ```bash

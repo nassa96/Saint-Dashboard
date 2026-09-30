@@ -108,6 +108,7 @@ class Engine {
     // 3) Risk + rebalance toward targets
     const equity = this.paper.equity(prices);
     this.risk.updateEquity(equity);
+    const minTradeUsd = this.config.capital.minTradeUsd || 1;
     const actions = [];
 
     for (const ev of evaluations) {
@@ -136,14 +137,18 @@ class Engine {
           continue;
         }
         const notional = Math.min(diff, assessment.maxNotional, this.paper.cash);
-        if (notional > 1) {
+        // Fee-aware floor: skip trades too small to survive fees + minimums.
+        if (notional >= minTradeUsd) {
           const fill = await this._execute({ symbol: ev.symbol, side: "BUY", notional, price });
           if (fill) actions.push({ symbol: ev.symbol, intent: "BUY", fill });
+        } else if (notional > 0) {
+          actions.push({ symbol: ev.symbol, intent: "BUY", skipped: `below min trade $${minTradeUsd}` });
         }
       } else {
         // Want less -> SELL (rotation out)
         const notional = Math.min(-diff, currentNotional);
-        if (notional > 1) {
+        // Allow small SELLs only if they close the position (avoid fee-dust dust).
+        if (notional >= minTradeUsd || notional >= currentNotional - 1e-9) {
           const fill = await this._execute({ symbol: ev.symbol, side: "SELL", notional, price });
           if (fill) actions.push({ symbol: ev.symbol, intent: "SELL", fill });
         }

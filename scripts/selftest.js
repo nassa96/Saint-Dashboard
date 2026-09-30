@@ -227,6 +227,22 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(stats.symbolStats.length === 2 && stats.distribution.length === 8, "analytics symbol breakdown + distribution");
   ok("analytics computes win rate, profit factor, expectancy, distribution");
 
+  // exchange credential store + runtime connect/disconnect
+  const credStore = require("../src/exchange/credStore");
+  const fs3 = require("fs");
+  try { fs3.unlinkSync(credStore.STORE_PATH); } catch {}
+  credStore.set("kraken", { key: "abc", secret: "xyz" });
+  assert(credStore.load().kraken.key === "abc", "credStore persists venue keys");
+  const ExchangeManager = require("../src/exchange/manager");
+  const em = new ExchangeManager(config);
+  assert(em.venues.kraken.hasCredentials(), "manager loads saved credentials on boot");
+  em.disconnect("kraken");
+  assert(!em.venues.kraken.hasCredentials(), "disconnect clears credentials");
+  assert(!credStore.load().kraken, "disconnect removes creds from store");
+  assert(typeof config.roundTripFeePct("coinbase") === "number" && config.capital.minTradeUsd >= 0, "fee-aware config present");
+  try { fs3.unlinkSync(credStore.STORE_PATH); } catch {}
+  ok("exchange credential store + runtime connect/disconnect work");
+
   console.log(`\nALL TESTS PASSED (${passed} checks) ✅`);
   process.exit(0);
 })().catch((e) => {

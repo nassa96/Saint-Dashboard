@@ -98,6 +98,7 @@ server.js ──► src/engine/engine.js  (the loop)
                  └─ src/memecoin/scanner.js     DexScreener detection + scoring
 public/index.html ──── live dashboard over /ws (WebSocket)
 public/analytics.html ─ trade journal & performance analytics
+public/connect.html ─── connect exchanges + view wallet status (Connections hub)
 ```
 
 ### REST API
@@ -106,6 +107,9 @@ public/analytics.html ─ trade journal & performance analytics
 - `GET  /api/signals` `/api/portfolio` `/api/memecoins` `/api/chronicle`
 - `GET  /api/exchanges/health` — venue reachability + whether keys are present
 - `GET  /api/exchanges/balances?venue=coinbase` — **read-only** balances
+- `GET  /api/exchanges/balances/all` — aggregated balances across every venue + fees
+- `POST /api/exchanges/connect` — save + verify venue keys `{venue,key,secret,passphrase?}` (read-only test)
+- `POST /api/exchanges/disconnect` — remove saved venue keys `{venue}`
 - `GET  /api/wallet/status` — on-chain wallet status (armed?, addresses)
 - `POST /api/wallet/quote` — read-only swap quote `{chain, tokenAddress, usd}`
 - `POST /api/wallet/swap` — **gated** real swap (refused unless armed)

@@ -154,15 +154,19 @@ hit. To flatten to cash and reset the paper book: `POST /api/portfolio/reset`.
 
 ## Risk profiles at a glance (`presets/`)
 
-| Setting | conservative | balanced | aggressive |
-|---|---|---|---|
-| Max per coin | 10% | 20% | 30% |
-| Max deployed | 40% | 60% | 80% |
-| Daily halt at | −5% | −10% | −15% |
-| Risk / trade | 1% | 2% | 3% |
-| Min confidence | 0.65 | 0.55 | 0.50 |
+| Setting | twenty-usdc | conservative | balanced | aggressive |
+|---|---|---|---|---|
+| Max per coin | 100% | 10% | 20% | 30% |
+| Max deployed | 100% | 40% | 60% | 80% |
+| Daily halt at | −10% | −5% | −10% | −15% |
+| Risk / trade | 5% | 1% | 2% | 3% |
+| Min confidence | 0.72 | 0.65 | 0.55 | 0.50 |
+| Min trade | $5 | $10 | $10 | $10 |
 
-Start conservative. Earn the right to loosen.
+**`twenty-usdc`** is tuned for a ~$20 account: it *concentrates* into the single best
+coin (you can't diversify $20 without fees eating you), trades only on strong signals,
+and uses a 3-coin liquid universe. Start conservative once you scale up; earn the right
+to loosen.
 
 ---
 

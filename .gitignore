@@ -7,3 +7,4 @@ data/*.json.bak
 data/chronicle.json
 data/portfolio.json
 data/strategy_params.json
+data/credentials.json

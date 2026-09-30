@@ -112,6 +112,28 @@ app.get("/api/exchanges/balances/all", async (req, res) => {
   }
 });
 
+// Connect a venue at runtime (save TRADE-scoped keys + verify). Read-only test;
+// never enables live trading. Keys land in data/credentials.json (git-ignored).
+app.post("/api/exchanges/connect", async (req, res) => {
+  try {
+    const { venue, key, secret, passphrase } = req.body || {};
+    if (!venue || !key || !secret) return res.status(400).json({ error: "venue, key and secret are required" });
+    res.json(await engine.exchanges.connect(venue.toLowerCase(), { key, secret, passphrase: passphrase || "" }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/exchanges/disconnect", (req, res) => {
+  try {
+    const venue = (req.body?.venue || "").toLowerCase();
+    if (!venue) return res.status(400).json({ error: "venue is required" });
+    res.json(engine.exchanges.disconnect(venue));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Backtest the live strategy over historical data
 let _btCache = null;
 app.post("/api/backtest", async (req, res) => {

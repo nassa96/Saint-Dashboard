@@ -17,6 +17,12 @@ class BaseExchange {
     return Boolean(this.creds.key && this.creds.secret);
   }
 
+  // Merge in credentials at runtime (from the Connections page / cred store).
+  setCredentials(creds = {}) {
+    this.creds = { ...this.creds, ...creds };
+    return this;
+  }
+
   // Public, unauthenticated reachability check.
   async testConnection() {
     throw new Error(`${this.name}.testConnection() not implemented`);

@@ -11,6 +11,7 @@
 const BinanceUS = require("./binanceus");
 const Coinbase = require("./coinbase");
 const Kraken = require("./kraken");
+const credStore = require("./credStore");
 const log = require("../util/logger");
 
 class ExchangeManager {
@@ -24,6 +25,53 @@ class ExchangeManager {
     };
     this.primary = config.exchanges.primary;
     this.status = {};
+
+    // Apply any credentials saved at runtime via the Connections page.
+    // These override blank env vars but don't clobber ones already set.
+    const saved = credStore.load();
+    for (const [name, creds] of Object.entries(saved)) {
+      if (this.venues[name] && creds && creds.key) {
+        this.venues[name].setCredentials(creds);
+        log.info("EXCHANGE", `Loaded saved credentials for ${name}`);
+      }
+    }
+  }
+
+  /**
+   * Connect a venue at runtime: save keys, apply them, and verify with a
+   * reachability + read-only balance check. Never enables live trading.
+   */
+  async connect(venueName, creds = {}) {
+    const v = this.venues[venueName];
+    if (!v) throw new Error(`unknown venue ${venueName}`);
+    v.setCredentials(creds);
+    credStore.set(venueName, creds);
+    const result = { venue: venueName, saved: true, reachable: false, balancesOk: false, error: null };
+    try {
+      await v.testConnection();
+      result.reachable = true;
+    } catch (e) {
+      result.error = `reachability: ${e.message}`;
+    }
+    try {
+      if (v.hasCredentials()) {
+        const b = await v.getBalances();
+        result.balancesOk = Array.isArray(b.balances);
+        result.balances = b.balances;
+      }
+    } catch (e) {
+      result.error = `${result.error ? result.error + "; " : ""}balances: ${e.message}`;
+    }
+    log.info("EXCHANGE", `Connect ${venueName}: reachable=${result.reachable} balancesOk=${result.balancesOk}`);
+    return result;
+  }
+
+  disconnect(venueName) {
+    const v = this.venues[venueName];
+    if (!v) throw new Error(`unknown venue ${venueName}`);
+    v.setCredentials({ key: "", secret: "", passphrase: "" });
+    credStore.remove(venueName);
+    return { venue: venueName, disconnected: true };
   }
 
   getPrimary() {

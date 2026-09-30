@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SAINT CORE — Connections</title>
+<style>
+  :root{--bg:#05070d;--panel:#0b0f1a;--panel2:#0f1526;--line:#1a2337;--txt:#cdd8f0;
+    --muted:#6c7a9c;--green:#00ffa3;--red:#ff4d6d;--amber:#ffc857;--blue:#4aa8ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#0d1830 0%,var(--bg) 60%);
+    color:var(--txt);font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+  .header{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;border-bottom:1px solid var(--line)}
+  .title{font-size:16px;letter-spacing:3px;font-weight:700}
+  .sub{color:var(--muted);font-size:11px;letter-spacing:1px}
+  a.btn{padding:6px 12px;border:1px solid var(--line);border-radius:8px;color:var(--blue);text-decoration:none;font-size:11px}
+  .wrap{max-width:1000px;margin:0 auto;padding:20px 22px;display:flex;flex-direction:column;gap:16px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card h3{margin:0 0 4px;font-size:13px;letter-spacing:1px}
+  .card .desc{color:var(--muted);font-size:11px;margin-bottom:14px}
+  .venue{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px;border:1px solid var(--line);border-radius:10px;margin-bottom:12px;background:#0a0e18}
+  .venue .name{font-weight:700;font-size:14px;min-width:110px}
+  .badge{font-size:10px;padding:3px 8px;border-radius:20px;border:1px solid var(--line)}
+  .b-on{color:var(--green);border-color:rgba(0,255,163,.4)}
+  .b-off{color:var(--muted)}
+  .b-warn{color:var(--amber);border-color:rgba(255,200,87,.4)}
+  .fees{color:var(--muted);font-size:11px;margin-left:auto}
+  .form{display:none;flex-basis:100%;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .form.open{display:flex}
+  input{background:#060911;border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:8px 10px;font-family:inherit;font-size:12px;flex:1;min-width:160px}
+  button{background:#12203a;border:1px solid var(--line);border-radius:8px;color:var(--blue);padding:8px 12px;font-family:inherit;font-size:12px;cursor:pointer}
+  button:hover{border-color:var(--blue)}
+  button.primary{background:#0d3b2e;color:var(--green);border-color:rgba(0,255,163,.4)}
+  button.danger{background:#2a0f16;color:var(--red);border-color:rgba(255,77,109,.35)}
+  .row-actions{display:flex;gap:8px}
+  .note{font-size:11px;color:var(--muted);line-height:1.6}
+  .warn{background:rgba(255,200,87,.08);border:1px solid rgba(255,200,87,.3);border-radius:10px;padding:12px;color:var(--amber);font-size:11px;line-height:1.6}
+  .result{flex-basis:100%;font-size:11px;margin-top:6px;white-space:pre-wrap}
+  code{background:#060911;padding:2px 6px;border-radius:4px;color:var(--blue)}
+  ol{margin:6px 0 0 18px;padding:0}li{margin:3px 0}
+</style>
+</head>
+<body>
+  <div class="header">
+    <div><div class="title">SAINT CORE — CONNECTIONS</div><div class="sub">EXCHANGES &amp; WALLET</div></div>
+    <a class="btn" href="/">← Back to dashboard</a>
+  </div>
+
+  <div class="wrap">
+    <div class="warn">
+      🔒 <b>Safety:</b> only paste API keys with <b>withdrawals DISABLED</b> (trade + view only).
+      Keys are saved to <code>data/credentials.json</code> on <b>your</b> server (git-ignored) and are used
+      read-only until you deliberately arm live trading. Set <code>DASHBOARD_PASSWORD</code> before exposing this page to any network.
+    </div>
+
+    <!-- EXCHANGES -->
+    <div class="card">
+      <h3>Exchange venues</h3>
+      <div class="desc">Connect the exchange your money is on. On Coinbase, use <b>Advanced Trade</b> keys (0.60% fee) — not the one-tap app.</div>
+      <div id="venues"></div>
+    </div>
+
+    <!-- WALLET -->
+    <div class="card">
+      <h3>On-chain wallet</h3>
+      <div class="desc">Self-custody swaps (Solana / EVM). Quotes are always read-only; real swaps stay hard-gated.</div>
+      <div id="wallet"></div>
+      <div class="warn" style="margin-top:12px">
+        A wallet <b>private key</b> controls all your funds, so — unlike exchange keys — it is <b>never</b> accepted through this web form.
+        Set it once in <code>.env</code> on your server (<code>SOLANA_PRIVATE_KEY</code> or <code>EVM_PRIVATE_KEY</code>) and restart. This page shows its status.
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Getting exchange API keys</h3>
+      <div class="note">
+        <b>Coinbase:</b>
+        <ol>
+          <li>Coinbase → Settings → API (or Advanced Trade API).</li>
+          <li>Create a key with <b>View</b> + <b>Trade</b> permissions. <b>Do NOT enable Transfer/Withdraw.</b></li>
+          <li>IP-allowlist your server if offered. Copy the API key, secret, and passphrase here.</li>
+        </ol>
+        <b>Kraken / Binance.US:</b> create an API key with trade + query permissions, withdrawals off, then paste key + secret (no passphrase).
+      </div>
+    </div>
+  </div>
+
+<script>
+const $=s=>document.querySelector(s);
+const VENUE_META={coinbase:{needsPass:true},kraken:{needsPass:false},binanceus:{needsPass:false}};
+
+async function jget(u){const r=await fetch(u);if(r.status===401){location.href='/login.html';throw 0;}return r.json();}
+async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json();}
+
+async function loadVenues(){
+  const [all,health]=await Promise.all([jget('/api/exchanges/balances/all'),jget('/api/exchanges/health')]);
+  const fees=all.fees||{};
+  const el=$("#venues");el.innerHTML="";
+  for(const name of Object.keys(VENUE_META)){
+    const v=all.venues[name]||{};const h=health[name]||{};
+    const connected=!(v.note==="no API keys configured");
+    const reach=h.reachable;
+    const f=fees[name];
+    const feeTxt=f?`${f.label}: ${f.maker}% / ${f.taker}% (maker/taker)`:"";
+    const div=document.createElement("div");div.className="venue";
+    div.innerHTML=`
+      <div class="name">${name}</div>
+      <span class="badge ${connected?'b-on':'b-off'}">${connected?'🔑 keys saved':'no keys'}</span>
+      <span class="badge ${reach?'b-on':'b-warn'}">${reach?'✓ reachable':'⚠ unreachable'}</span>
+      <span class="fees">${feeTxt}</span>
+      <div class="row-actions">
+        <button onclick="toggleForm('${name}')">${connected?'Update keys':'Connect'}</button>
+        <button onclick="test('${name}')">Test</button>
+        ${connected?`<button class="danger" onclick="disc('${name}')">Disconnect</button>`:''}
+      </div>
+      <div class="form" id="form-${name}">
+        <input id="k-${name}" placeholder="API key" autocomplete="off">
+        <input id="s-${name}" placeholder="API secret" type="password" autocomplete="off">
+        ${VENUE_META[name].needsPass?`<input id="p-${name}" placeholder="passphrase" type="password" autocomplete="off">`:''}
+        <button class="primary" onclick="connect('${name}')">Save &amp; verify</button>
+      </div>
+      <div class="result" id="res-${name}"></div>`;
+    el.appendChild(div);
+  }
+}
+window.toggleForm=n=>$("#form-"+n).classList.toggle("open");
+window.connect=async n=>{
+  const body={venue:n,key:$("#k-"+n).value.trim(),secret:$("#s-"+n).value.trim()};
+  if(VENUE_META[n].needsPass)body.passphrase=($("#p-"+n).value||"").trim();
+  $("#res-"+n).textContent="Saving & verifying…";
+  const r=await jpost('/api/exchanges/connect',body);
+  $("#res-"+n).textContent=r.error?("⚠ "+JSON.stringify(r)):
+    `✓ saved. reachable=${r.reachable} balancesOk=${r.balancesOk}`+(r.error?(" — "+r.error):"");
+  loadVenues();
+};
+window.disc=async n=>{await jpost('/api/exchanges/disconnect',{venue:n});loadVenues();};
+window.test=async n=>{
+  $("#res-"+n).textContent="Testing…";
+  const h=await jget('/api/exchanges/health');const e=h[n]||{};
+  $("#res-"+n).textContent=e.reachable?"✓ reachable":("⚠ "+(e.error||"unreachable")+"  (offline hosts can't reach exchanges)");
+};
+
+async function loadWallet(){
+  const w=await jget('/api/wallet/status');
+  $("#wallet").innerHTML=`
+    <div class="venue"><div class="name">Solana</div>
+      <span class="badge ${w.solana.hasKey?'b-on':'b-off'}">${w.solana.hasKey?'🔑 key in .env':'no key'}</span>
+      <span class="fees">${w.solana.address||'no address'}</span></div>
+    <div class="venue"><div class="name">EVM</div>
+      <span class="badge ${w.evm.hasKey?'b-on':'b-off'}">${w.evm.hasKey?'🔑 key in .env':'no key'}</span>
+      <span class="badge ${w.evm.quotesReady?'b-on':'b-warn'}">${w.evm.quotesReady?'quotes ready':'no 0x key'}</span>
+      <span class="fees">${w.evm.chain||''} ${w.evm.address||''}</span></div>
+    <div class="note">On-chain swaps armed: <b>${w.onchainArmed?'YES':'NO (safe)'}</b> · max swap $${w.maxSwapUsd} · slippage ${w.slippageBps} bps</div>`;
+}
+
+loadVenues();loadWallet();
+setInterval(()=>{loadVenues();loadWallet();},15000);
+</script>
+</body>
+</html>

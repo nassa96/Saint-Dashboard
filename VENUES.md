@@ -19,6 +19,18 @@ what's wired up, the real fee/capital math, and how to add more venues.
 
 Pick your active venue with `PRIMARY_EXCHANGE=coinbase|binanceus|kraken`.
 
+### Easiest way to connect: the Connections page
+Open **`/connect.html`** (🔌 Connect in the dashboard header). For each venue you get
+a status badge (keys saved? reachable?), the fee schedule, and a form to paste your
+**trade-only** API key/secret (+ passphrase for Coinbase). Hit **Save & verify** and it
+saves to `data/credentials.json` (git-ignored) and runs a read-only reachability +
+balance check. **Disconnect** wipes them. Live trading stays off regardless — connecting
+only enables read-only access until you deliberately arm it.
+
+> Wallet **private keys** are intentionally *not* accepted through the web form (they
+> control all your funds). Set `SOLANA_PRIVATE_KEY` / `EVM_PRIVATE_KEY` in `.env`; the
+> Connections page shows their status.
+
 ---
 
 ## Real fees (entry tier, 2025–2026 published schedules)

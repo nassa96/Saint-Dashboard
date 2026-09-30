@@ -110,6 +110,9 @@ public/connect.html ─── connect exchanges + view wallet status (Connection
 - `GET  /api/exchanges/balances/all` — aggregated balances across every venue + fees
 - `POST /api/exchanges/connect` — save + verify venue keys `{venue,key,secret,passphrase?}` (read-only test)
 - `POST /api/exchanges/disconnect` — remove saved venue keys `{venue}`
+- `GET  /api/live/status` — live-arming status (armed?, testnet?, auth?, connected?)
+- `POST /api/live/arm` — arm live trading `{confirm:"I ACCEPT THE RISK"}` (refused unless primary venue connected)
+- `POST /api/live/disarm` — instant kill switch back to PAPER
 - `GET  /api/wallet/status` — on-chain wallet status (armed?, addresses)
 - `POST /api/wallet/quote` — read-only swap quote `{chain, tokenAddress, usd}`
 - `POST /api/wallet/swap` — **gated** real swap (refused unless armed)

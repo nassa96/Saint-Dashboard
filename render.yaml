@@ -1,0 +1,62 @@
+# ============================================================
+# Render Blueprint for SAINT CORE
+# Deploy: push this repo to GitHub, then in Render click
+#   New + → Blueprint → pick this repo. Render reads this file.
+# See RENDER.md for the full walkthrough.
+# ============================================================
+services:
+  - type: web
+    name: saint-core
+    runtime: node
+    plan: starter            # Starter+ runs 24/7. The Free plan SLEEPS when idle — bad for a bot.
+    region: oregon           # pick the region closest to you / your exchange
+    branch: arena/01a0f196-saint-dashboard
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    # Persistent disk so portfolio.json / credentials.json / live_arm.json survive redeploys.
+    # (Disks require a paid instance type; remove this block on Free.)
+    disk:
+      name: saint-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: PORT
+        value: "10000"        # Render sets PORT; the server already honors process.env.PORT
+      # ---- Safety: PAPER by default. Arm live from the dashboard when ready. ----
+      - key: TRADING_MODE
+        value: PAPER
+      - key: USE_TESTNET
+        value: "true"
+      # ---- Protect the dashboard (REQUIRED before exposing publicly) ----
+      - key: DASHBOARD_PASSWORD
+        sync: false           # set the value in the Render dashboard, not in git
+      - key: SESSION_SECRET
+        generateValue: true   # Render generates a strong random secret
+      # ---- Your $20 USDC tuning (matches presets/twenty-usdc.env) ----
+      - key: STARTING_EQUITY
+        value: "20"
+      - key: MIN_TRADE_USD
+        value: "5"
+      - key: MAX_POSITION_PCT
+        value: "1.0"
+      - key: MAX_PORTFOLIO_RISK_PCT
+        value: "1.0"
+      - key: MIN_SIGNAL_CONFIDENCE
+        value: "0.72"
+      - key: TRADE_UNIVERSE
+        value: BTC-USD,ETH-USD,SOL-USD
+      - key: STRATEGY
+        value: momentum
+      - key: PRIMARY_EXCHANGE
+        value: coinbase
+      # ---- Exchange keys: set these in the Render dashboard (never in git) ----
+      - key: COINBASE_API_KEY
+        sync: false
+      - key: COINBASE_API_SECRET
+        sync: false
+      - key: COINBASE_API_PASSPHRASE
+        sync: false

@@ -243,6 +243,21 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   try { fs3.unlinkSync(credStore.STORE_PATH); } catch {}
   ok("exchange credential store + runtime connect/disconnect work");
 
+  // runtime live-arming (one-click arm + kill switch)
+  const armCfg = require("../config");
+  try { fs3.unlinkSync(require("path").join(__dirname, "..", "data", "live_arm.json")); } catch {}
+  armCfg.disarmLive();
+  assert(armCfg.canTradeLive() === false, "default is PAPER (not armed)");
+  let rejected = false;
+  try { armCfg.armLive("nope"); } catch { rejected = true; }
+  assert(rejected && armCfg.canTradeLive() === false, "arm rejects wrong confirmation phrase");
+  armCfg.armLive("I ACCEPT THE RISK");
+  assert(armCfg.canTradeLive() === true && armCfg.liveStatus().webArmed === true, "arm with exact phrase enables live");
+  armCfg.disarmLive();
+  assert(armCfg.canTradeLive() === false, "disarm instantly returns to PAPER");
+  try { fs3.unlinkSync(require("path").join(__dirname, "..", "data", "live_arm.json")); } catch {}
+  ok("runtime live-arming: default off, phrase-gated arm, instant disarm");
+
   console.log(`\nALL TESTS PASSED (${passed} checks) ✅`);
   process.exit(0);
 })().catch((e) => {

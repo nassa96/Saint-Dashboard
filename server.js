@@ -134,6 +134,40 @@ app.post("/api/exchanges/disconnect", (req, res) => {
   }
 });
 
+// ---- Live trading arm / disarm (the one-click kill switch) ----
+app.get("/api/live/status", (req, res) => {
+  const s = config.liveStatus();
+  res.json({
+    ...s,
+    authEnabled: auth.enabled,
+    primaryConnected: engine.exchanges.venues[s.primary]?.hasCredentials() || false,
+  });
+});
+
+app.post("/api/live/arm", (req, res) => {
+  try {
+    const primary = config.exchanges.primary;
+    const connected = engine.exchanges.venues[primary]?.hasCredentials();
+    if (!connected) {
+      return res.status(400).json({ error: `Connect ${primary} API keys before arming live trading.` });
+    }
+    config.armLive(req.body?.confirm || "");
+    const warnings = [];
+    if (config.useTestnet) warnings.push("USE_TESTNET is true — orders go to the TESTNET, not real markets. Set USE_TESTNET=false for real trading.");
+    if (!auth.enabled) warnings.push("DASHBOARD_PASSWORD is not set — anyone who can reach this page can control live trading. Set it now.");
+    log.warn("SERVER", "LIVE TRADING ARMED via dashboard");
+    res.json({ ...config.liveStatus(), warnings });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/live/disarm", (req, res) => {
+  config.disarmLive();
+  log.warn("SERVER", "LIVE TRADING DISARMED via dashboard");
+  res.json(config.liveStatus());
+});
+
 // Backtest the live strategy over historical data
 let _btCache = null;
 app.post("/api/backtest", async (req, res) => {

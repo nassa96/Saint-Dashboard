@@ -60,6 +60,16 @@
       <div id="venues"></div>
     </div>
 
+    <!-- LIVE ARMING -->
+    <div class="card" id="live-card" style="border-color:rgba(255,77,109,.35)">
+      <h3>⚡ Live trading</h3>
+      <div class="desc">Paper mode is safe and default. Arming sends <b>real orders with real money</b> on your primary venue. Requires connected keys + the exact confirmation phrase. Disarm is instant.</div>
+      <div id="live-status"></div>
+      <div class="warn" id="live-warn" style="display:none;margin-top:12px"></div>
+      <div id="live-controls" style="margin-top:14px"></div>
+      <div class="result" id="live-result"></div>
+    </div>
+
     <!-- WALLET -->
     <div class="card">
       <h3>On-chain wallet</h3>
@@ -153,8 +163,55 @@ async function loadWallet(){
     <div class="note">On-chain swaps armed: <b>${w.onchainArmed?'YES':'NO (safe)'}</b> · max swap $${w.maxSwapUsd} · slippage ${w.slippageBps} bps</div>`;
 }
 
-loadVenues();loadWallet();
-setInterval(()=>{loadVenues();loadWallet();},15000);
+async function loadLive(){
+  const s=await jget('/api/live/status');
+  const armed=s.canTradeLive;
+  $("#live-card").style.borderColor=armed?'rgba(255,77,109,.7)':'rgba(255,77,109,.35)';
+  $("#live-status").innerHTML=`
+    <div class="venue" style="border-color:${armed?'rgba(255,77,109,.5)':'var(--line)'}">
+      <div class="name">Status</div>
+      <span class="badge ${armed?'b-warn':'b-on'}" style="${armed?'color:var(--red);border-color:rgba(255,77,109,.5)':''}">${armed?'🔴 LIVE — REAL ORDERS':'🟢 PAPER (safe)'}</span>
+      <span class="badge ${s.primaryConnected?'b-on':'b-off'}">${s.primary} ${s.primaryConnected?'connected':'not connected'}</span>
+      <span class="badge ${s.useTestnet?'b-warn':'b-on'}">${s.useTestnet?'TESTNET':'real markets'}</span>
+      <span class="badge ${s.authEnabled?'b-on':'b-warn'}">${s.authEnabled?'password set':'no password'}</span>
+      ${s.armedAt?`<span class="fees">armed ${new Date(s.armedAt).toLocaleString()}</span>`:''}
+    </div>`;
+  const c=$("#live-controls");
+  if(armed){
+    c.innerHTML=`<button class="danger" style="font-size:14px;padding:12px 20px" onclick="disarm()">■ DISARM — stop live trading now</button>`;
+  }else{
+    c.innerHTML=`
+      <div class="note" style="margin-bottom:8px">To arm, type the exact phrase <code>I ACCEPT THE RISK</code> and confirm:</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="arm-phrase" placeholder="I ACCEPT THE RISK" autocomplete="off" style="min-width:220px">
+        <button class="danger" onclick="arm()">⚡ Arm live trading</button>
+      </div>`;
+  }
+}
+window.arm=async()=>{
+  const confirm=($("#arm-phrase").value||"").trim();
+  if(!window.confirm("This will place REAL orders with REAL money. Continue?"))return;
+  $("#live-result").textContent="Arming…";
+  const r=await jpost('/api/live/arm',{confirm});
+  if(r.error){$("#live-result").textContent="⚠ "+r.error;}
+  else{
+    $("#live-result").textContent="✅ Live trading ARMED.";
+    const w=$("#live-warn");
+    if(r.warnings&&r.warnings.length){w.style.display='block';w.innerHTML="⚠ "+r.warnings.join("<br>⚠ ");}
+    else{w.style.display='none';}
+  }
+  loadLive();
+};
+window.disarm=async()=>{
+  $("#live-result").textContent="Disarming…";
+  await jpost('/api/live/disarm',{});
+  $("#live-result").textContent="🟢 Disarmed — back to safe PAPER mode.";
+  $("#live-warn").style.display='none';
+  loadLive();
+};
+
+loadVenues();loadWallet();loadLive();
+setInterval(()=>{loadVenues();loadWallet();loadLive();},15000);
 </script>
 </body>
 </html>

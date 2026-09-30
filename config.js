@@ -169,12 +169,67 @@ config.roundTripFeePct = function roundTripFeePct(venue) {
   return f ? (f.taker * 2) : 1.2;
 };
 
+// ---- Runtime live-arming (the "one-click arm" from the dashboard) ----
+// Default OFF. Persisted to data/live_arm.json so a redeploy keeps the
+// operator's intent; can be disarmed instantly (kill switch). Requires the
+// exact confirmation phrase to arm.
+const ARM_PATH = path.join(__dirname, "data", "live_arm.json");
+const ARM_PHRASE = "I ACCEPT THE RISK";
+config.arming = { armed: false, armedAt: null };
+(function loadArm() {
+  try {
+    const s = JSON.parse(fs.readFileSync(ARM_PATH, "utf8"));
+    if (s && s.armed === true) config.arming = s;
+  } catch (_) {
+    /* no persisted arm state -> stays OFF */
+  }
+})();
+
+config.armLive = function armLive(confirm) {
+  if (confirm !== ARM_PHRASE) {
+    throw new Error(`confirmation phrase must be exactly: ${ARM_PHRASE}`);
+  }
+  config.arming = { armed: true, armedAt: Date.now() };
+  try {
+    fs.mkdirSync(path.dirname(ARM_PATH), { recursive: true });
+    fs.writeFileSync(ARM_PATH, JSON.stringify(config.arming, null, 2), { mode: 0o600 });
+  } catch (_) {}
+  return config.arming;
+};
+
+config.disarmLive = function disarmLive() {
+  config.arming = { armed: false, armedAt: null, disarmedAt: Date.now() };
+  try {
+    fs.writeFileSync(ARM_PATH, JSON.stringify(config.arming, null, 2), { mode: 0o600 });
+  } catch (_) {}
+  return config.arming;
+};
+
 config.canTradeLive = function canTradeLive() {
-  return (
+  // Two independent ways to arm, both requiring the confirmation phrase:
+  //  1) Infra opt-in via .env (MODE=LIVE + LIVE_TRADING_ENABLED + confirm)
+  //  2) Runtime web arm from the Connections page (config.arming.armed)
+  const envArmed =
     config.mode === "LIVE" &&
     config.liveTradingEnabled === true &&
-    config.liveTradingConfirm === "I ACCEPT THE RISK"
-  );
+    config.liveTradingConfirm === ARM_PHRASE;
+  return envArmed || config.arming.armed === true;
+};
+
+config.liveStatus = function liveStatus() {
+  return {
+    canTradeLive: config.canTradeLive(),
+    armPhrase: ARM_PHRASE,
+    webArmed: config.arming.armed === true,
+    armedAt: config.arming.armedAt || null,
+    envArmed:
+      config.mode === "LIVE" &&
+      config.liveTradingEnabled === true &&
+      config.liveTradingConfirm === ARM_PHRASE,
+    useTestnet: config.useTestnet,
+    primary: config.exchanges.primary,
+    mode: config.mode,
+  };
 };
 
 /**

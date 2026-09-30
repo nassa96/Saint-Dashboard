@@ -35,7 +35,7 @@ v2 replaces that core with real, working machinery:
 | Alerts | none | Telegram + Discord alerts on fills & high-score memecoins (`src/alerts`) |
 | Strategies | 1 fixed | Pluggable registry: momentum, mean-reversion, ensemble (`src/signals/strategies`) |
 | Optimization | none | Grid search + walk-forward validation (`src/backtest/optimizer.js`) |
-| CI | none | GitHub Actions: self-test on Node 18/20/22 + boot smoke test (`.github/workflows`) |
+| CI | none | GitHub Actions: self-test on Node 18/20/22 + boot smoke test (`ci/`, see `ci/README.md`) |
 
 ### LIVE vs SIM labeling
 Every price, signal, and candidate is tagged **`LIVE`** or **`SIM`**. If the host

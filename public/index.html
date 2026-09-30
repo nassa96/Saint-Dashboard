@@ -68,6 +68,13 @@
     padding:2px 8px;font-size:10px;cursor:pointer;font-family:inherit}
   .mini-btn:hover{background:rgba(74,168,255,.12)}
   .mini-btn.danger{border-color:var(--red);color:var(--red)}
+  .live-pill{margin-left:14px;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;
+    letter-spacing:1px;text-decoration:none;border:1px solid;white-space:nowrap}
+  .live-pill.paper{color:var(--green);border-color:rgba(0,255,163,.45);background:rgba(0,255,163,.08)}
+  .live-pill.live{color:#fff;border-color:var(--red);background:var(--red);
+    animation:livepulse 1.6s ease-in-out infinite}
+  .live-pill.testnet{color:var(--amber);border-color:rgba(255,200,87,.5);background:rgba(255,200,87,.1)}
+  @keyframes livepulse{0%,100%{box-shadow:0 0 0 0 rgba(255,77,109,.5)}50%{box-shadow:0 0 0 6px rgba(255,77,109,0)}}
   .mini-btn.danger:hover{background:rgba(255,77,109,.12)}
   .mini-select{background:#070b14;border:1px solid #1a2337;color:#cdd8f0;border-radius:6px;
     padding:2px 6px;font-size:10px;font-family:inherit}
@@ -82,6 +89,7 @@
         <div class="title">SAINT&nbsp;CORE</div>
         <div class="sub">OMNIVEX TRADING INTELLIGENCE</div>
       </div>
+      <a href="/connect.html" id="live-pill" class="live-pill paper" title="Trading mode — click to manage">🟢 PAPER</a>
     </div>
     <div class="badges" id="badges"></div>
     <div style="display:flex;gap:8px;align-items:center">
@@ -462,6 +470,23 @@ function guardedFetch(url,opts){
 guardedFetch('/api/state').then(r=>r.json()).then(render).catch(()=>{});
 connect();
 window.addEventListener('resize',()=>{fetch('/api/state').then(r=>r.json()).then(render).catch(()=>{});});
+// Live/paper mode pill in the header (polls the arm status).
+async function refreshLivePill(){
+  try{
+    const r=await fetch('/api/live/status');
+    if(!r.ok)return;
+    const s=await r.json();
+    const el=document.getElementById('live-pill');
+    if(!el)return;
+    if(s.canTradeLive){
+      if(s.useTestnet){el.className='live-pill testnet';el.textContent='🟡 LIVE · TESTNET';}
+      else{el.className='live-pill live';el.textContent='🔴 LIVE · REAL MONEY';}
+    }else{
+      el.className='live-pill paper';el.textContent='🟢 PAPER';
+    }
+  }catch(_){}
+}
+refreshLivePill();setInterval(refreshLivePill,7000);
 </script>
 </body>
 </html>

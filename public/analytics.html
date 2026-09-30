@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SAINT CORE — Trade Analytics</title>
+<style>
+  :root{--bg:#05070d;--panel:#0b0f1a;--panel2:#0f1526;--line:#1a2337;--txt:#cdd8f0;
+    --muted:#6c7a9c;--green:#00ffa3;--red:#ff4d6d;--amber:#ffc857;--blue:#4aa8ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#0d1830 0%,var(--bg) 60%);
+    color:var(--txt);font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+  .header{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;
+    border-bottom:1px solid var(--line)}
+  .title{font-size:16px;letter-spacing:3px;font-weight:700}
+  .sub{color:var(--muted);font-size:11px;letter-spacing:1px}
+  a.btn{padding:6px 12px;border:1px solid var(--line);border-radius:8px;color:var(--blue);text-decoration:none;font-size:11px}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;padding:18px 22px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:14px;padding:16px}
+  .card h3{margin:0 0 12px;font-size:11px;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
+  .span3{grid-column:span 3}.span4{grid-column:span 4}.span6{grid-column:span 6}.span8{grid-column:span 8}.span12{grid-column:span 12}
+  .kpi{font-size:24px;font-weight:800}.kpi.small{font-size:17px}
+  .mini{font-size:10px;color:var(--muted)}
+  .pos{color:var(--green)}.neg{color:var(--red)}.mut{color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;color:var(--muted);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--line);font-size:10px;letter-spacing:1px}
+  td{padding:6px 8px;border-bottom:1px solid rgba(26,35,55,.5)}
+  .bar-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+  .bar-row .lbl{width:80px;font-size:10px;color:var(--muted)}
+  .bar-row .track{flex:1;height:14px;background:#0d1526;border-radius:4px;overflow:hidden}
+  .bar-row .track>i{display:block;height:100%}
+  .bar-row .n{width:28px;text-align:right;font-size:11px}
+  canvas{width:100%;height:160px;display:block}
+  @media(max-width:1000px){.grid>*{grid-column:span 12!important}}
+</style>
+</head>
+<body>
+  <div class="header">
+    <div><div class="title">SAINT CORE — TRADE ANALYTICS</div><div class="sub">CLOSED-TRADE JOURNAL &amp; PERFORMANCE</div></div>
+    <a class="btn" href="/">← Back to dashboard</a>
+  </div>
+
+  <div class="grid">
+    <div class="card span3"><h3>Net PnL</h3><div class="kpi" id="k-net">—</div><div class="mini" id="k-net-sub"></div></div>
+    <div class="card span3"><h3>Win Rate</h3><div class="kpi" id="k-wr">—</div><div class="mini" id="k-wr-sub"></div></div>
+    <div class="card span3"><h3>Profit Factor</h3><div class="kpi" id="k-pf">—</div><div class="mini">gross win / gross loss</div></div>
+    <div class="card span3"><h3>Expectancy</h3><div class="kpi small" id="k-exp">—</div><div class="mini">avg $ per trade</div></div>
+
+    <div class="card span3"><h3>Avg Win</h3><div class="kpi small pos" id="k-aw">—</div></div>
+    <div class="card span3"><h3>Avg Loss</h3><div class="kpi small neg" id="k-al">—</div></div>
+    <div class="card span3"><h3>Max Drawdown</h3><div class="kpi small neg" id="k-dd">—</div></div>
+    <div class="card span3"><h3>Avg Hold</h3><div class="kpi small" id="k-hold">—</div></div>
+
+    <div class="card span8"><h3>Cumulative Realized PnL (per closed trade)</h3><canvas id="cum"></canvas></div>
+    <div class="card span4"><h3>PnL % Distribution</h3><div id="dist"></div></div>
+
+    <div class="card span6"><h3>Performance by Symbol</h3>
+      <table><thead><tr><th>Symbol</th><th>Trades</th><th>Win%</th><th>Net PnL</th></tr></thead><tbody id="bysym"></tbody></table>
+    </div>
+    <div class="card span6"><h3>Best / Worst</h3><div id="bestworst"></div></div>
+
+    <div class="card span12"><h3>Recent Closed Trades</h3>
+      <table><thead><tr><th>Time</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>Qty</th><th>PnL</th><th>PnL %</th><th>Hold</th></tr></thead><tbody id="trades"></tbody></table>
+    </div>
+  </div>
+
+<script>
+const $=id=>document.getElementById(id);
+const money=n=>n==null?"—":(n<0?"-$":"$")+Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const cls=n=>n>=0?"pos":"neg";
+const pct=n=>n==null?"—":(n>=0?"+":"")+n+"%";
+function holdFmt(ms){if(!ms)return "—";const m=ms/60000;if(m<60)return m.toFixed(0)+"m";const h=m/60;if(h<24)return h.toFixed(1)+"h";return (h/24).toFixed(1)+"d";}
+
+async function load(){
+  let d;
+  try{const r=await fetch('/api/analytics');if(r.status===401){location.href='/login.html';return;}d=await r.json();}catch(e){return;}
+  $("k-net").innerHTML=`<span class="${cls(d.netPnl)}">${money(d.netPnl)}</span>`;
+  $("k-net-sub").innerText=`${d.totalTrades} closed trades`;
+  $("k-wr").innerText=d.winRatePct+"%";
+  $("k-wr-sub").innerText=`${d.wins}W / ${d.losses}L`;
+  $("k-pf").innerText=d.profitFactor==null?"∞":d.profitFactor;
+  $("k-exp").innerHTML=`<span class="${cls(d.expectancy)}">${money(d.expectancy)}</span>`;
+  $("k-aw").innerText=money(d.avgWin);
+  $("k-al").innerText=money(-d.avgLoss);
+  $("k-dd").innerText="-"+d.maxDrawdownPct+"%";
+  $("k-hold").innerText=d.avgHoldMinutes<60?d.avgHoldMinutes+"m":(d.avgHoldMinutes/60).toFixed(1)+"h";
+
+  // distribution
+  const maxC=Math.max(1,...d.distribution.map(b=>b.count));
+  $("dist").innerHTML=d.distribution.map(b=>{
+    const neg=b.max<=0;const w=Math.round(b.count/maxC*100);
+    return `<div class="bar-row"><div class="lbl">${b.label}</div><div class="track"><i style="width:${w}%;background:${neg?'var(--red)':'var(--green)'}"></i></div><div class="n">${b.count}</div></div>`;
+  }).join("");
+
+  // by symbol
+  $("bysym").innerHTML=(d.symbolStats||[]).map(s=>`<tr><td>${s.symbol}</td><td>${s.trades}</td><td>${s.winRatePct}%</td><td class="${cls(s.pnl)}">${money(s.pnl)}</td></tr>`).join("")||`<tr><td colspan="4" class="mut">No closed trades yet.</td></tr>`;
+
+  // best/worst
+  const bw=(t,lbl)=>t?`<div class="mini">${lbl}</div><div class="kpi small ${cls(t.pnl)}">${t.symbol} ${money(t.pnl)} (${pct(t.pnlPct)})</div>`:'';
+  $("bestworst").innerHTML=(d.bestTrade||d.worstTrade)?(bw(d.bestTrade,"Best trade")+'<div style="height:10px"></div>'+bw(d.worstTrade,"Worst trade")):'<div class="mut">No closed trades yet.</div>';
+
+  // trades
+  $("trades").innerHTML=(d.recentTrades||[]).map(t=>`<tr>
+    <td class="mini">${new Date(t.ts).toLocaleString()}</td><td>${t.symbol}</td>
+    <td>${t.entryPrice}</td><td>${t.exitPrice}</td><td>${t.qty}</td>
+    <td class="${cls(t.pnl)}">${money(t.pnl)}</td><td class="${cls(t.pnlPct)}">${pct(t.pnlPct)}</td>
+    <td class="mini">${holdFmt(t.holdMs)}</td></tr>`).join("")||`<tr><td colspan="8" class="mut">No closed trades yet — let the engine run or check back after some rotations.</td></tr>`;
+
+  drawCum(d.cumulative||[]);
+}
+function drawCum(data){
+  const c=$("cum");if(!c)return;const ctx=c.getContext("2d");
+  const w=c.width=c.clientWidth*devicePixelRatio,h=c.height=160*devicePixelRatio;
+  ctx.clearRect(0,0,w,h);
+  if(data.length<2){ctx.fillStyle="#6c7a9c";ctx.font=`${12*devicePixelRatio}px monospace`;ctx.fillText("Not enough closed trades yet",12,24*devicePixelRatio);return;}
+  const min=Math.min(0,...data),max=Math.max(0,...data),rng=(max-min)||1;
+  const px=i=>i/(data.length-1)*w,py=v=>h-((v-min)/rng)*(h*0.8)-h*0.1;
+  // zero line
+  ctx.strokeStyle="rgba(108,122,156,.3)";ctx.beginPath();ctx.moveTo(0,py(0));ctx.lineTo(w,py(0));ctx.stroke();
+  ctx.beginPath();data.forEach((v,i)=>i?ctx.lineTo(px(i),py(v)):ctx.moveTo(px(i),py(v)));
+  ctx.strokeStyle=data[data.length-1]>=0?"#00ffa3":"#ff4d6d";ctx.lineWidth=2*devicePixelRatio;ctx.stroke();
+}
+load();setInterval(load,10000);
+window.addEventListener('resize',load);
+</script>
+</body>
+</html>

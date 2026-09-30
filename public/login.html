@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SAINT CORE — Sign in</title>
+<style>
+  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(1000px 500px at 50% -10%,#0d1830 0%,#05070d 60%);
+    font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;color:#cdd8f0}
+  .box{background:linear-gradient(180deg,#0b0f1a,#0f1526);border:1px solid #1a2337;
+    border-radius:16px;padding:32px;width:320px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .logo{width:44px;height:44px;border-radius:12px;margin:0 auto 16px;
+    background:linear-gradient(135deg,#00ffa3,#4aa8ff);display:flex;align-items:center;
+    justify-content:center;color:#04121a;font-weight:900;font-size:22px}
+  h1{font-size:15px;letter-spacing:3px;text-align:center;margin:0 0 4px}
+  .sub{color:#6c7a9c;font-size:11px;text-align:center;margin-bottom:22px;letter-spacing:1px}
+  label{display:block;font-size:10px;color:#6c7a9c;letter-spacing:1px;margin:12px 0 5px;text-transform:uppercase}
+  input{width:100%;box-sizing:border-box;background:#070b14;border:1px solid #1a2337;
+    color:#cdd8f0;padding:11px 12px;border-radius:8px;font-family:inherit;font-size:13px}
+  input:focus{outline:none;border-color:#4aa8ff}
+  button{width:100%;margin-top:20px;background:linear-gradient(135deg,#00ffa3,#4aa8ff);
+    border:none;color:#04121a;font-weight:800;padding:12px;border-radius:8px;cursor:pointer;
+    font-family:inherit;letter-spacing:1px}
+  button:hover{opacity:.9}
+  .err{color:#ff4d6d;font-size:11px;text-align:center;margin-top:14px;min-height:14px}
+</style>
+</head>
+<body>
+  <form class="box" onsubmit="return doLogin(event)">
+    <div class="logo">S</div>
+    <h1>SAINT CORE</h1>
+    <div class="sub">SECURE ACCESS</div>
+    <label>Username</label>
+    <input id="user" autocomplete="username" value="admin" />
+    <label>Password</label>
+    <input id="pass" type="password" autocomplete="current-password" />
+    <button type="submit">SIGN IN</button>
+    <div class="err" id="err"></div>
+  </form>
+<script>
+async function doLogin(e){
+  e.preventDefault();
+  document.getElementById('err').innerText='';
+  try{
+    const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({user:document.getElementById('user').value,password:document.getElementById('pass').value})});
+    const d=await res.json();
+    if(!res.ok||!d.token){document.getElementById('err').innerText=d.error||'Invalid credentials';return false;}
+    // cookie is set by server (httpOnly); also store token for WS param fallback
+    try{localStorage.setItem('saint_token',d.token);}catch(_){}
+    location.href='/';
+  }catch(err){document.getElementById('err').innerText=err.message;}
+  return false;
+}
+</script>
+</body>
+</html>

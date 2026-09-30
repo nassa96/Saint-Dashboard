@@ -1,11 +1,22 @@
 {
   "name": "saint-trading-dashboard",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "description": "SAINT/OMNIVEX trading intelligence — real market data, signal engine, capital rotation, memecoin detection, and hard-gated live execution.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node scripts/selftest.js",
+    "backtest": "node scripts/backtest.js",
+    "optimize": "node scripts/optimize.js",
+    "docker:up": "docker compose up -d --build",
+    "docker:logs": "docker compose logs -f",
+    "docker:down": "docker compose down"
   },
   "dependencies": {
+    "@solana/web3.js": "^1.99.0",
+    "bs58": "^6.0.0",
+    "ethers": "^6.17.0",
     "express": "^4.22.2",
     "ws": "^8.21.0"
   },

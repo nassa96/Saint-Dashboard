@@ -1,1 +1,8 @@
 node_modules/
+.env
+.env.local
+*.log
+data/*.json.bak
+.DS_Store
+data/chronicle.json
+data/portfolio.json

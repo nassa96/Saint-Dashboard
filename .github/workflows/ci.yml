@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Self-test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Syntax check
+        run: |
+          node -c server.js
+          node -c config.js
+
+      - name: Run self-test suite
+        run: npm test
+
+  smoke:
+    name: Boot smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci || npm install
+      - name: Boot server and hit health endpoint
+        run: |
+          node server.js &
+          SRV=$!
+          sleep 4
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/health)
+          echo "health: $code"
+          kill $SRV || true
+          test "$code" = "200"

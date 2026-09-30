@@ -54,9 +54,14 @@ data** so the dashboard stays functional — and automatically switches to real
 npm install
 cp .env.example .env      # edit as needed (safe defaults are fine to start)
 npm start                 # http://localhost:3000
-npm test                  # offline self-test of the full pipeline (10 checks)
+npm test                  # offline self-test of the full pipeline (20 checks)
+npm run validate          # walk-forward every strategy → robust YES/NO verdict
 npm run backtest          # backtest the strategy (real candles when online)
 ```
+
+> 💰 **Going live with real money? Start with [`LAUNCH.md`](LAUNCH.md)** — a staged
+> runbook (validate → paper → tiny live → scale) with risk presets in `presets/`
+> and a pre-flight checklist. It's built to keep you from blowing up.
 
 For 24/7 hosting (Docker / VPS / systemd) see **`DEPLOY.md`**:
 ```bash

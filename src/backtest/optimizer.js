@@ -42,15 +42,17 @@ class Optimizer {
    */
   gridSearch(series, strategyName = "momentum", opts = {}) {
     const strat = registry.get(strategyName);
-    if (!strat) throw new Error(`unknown strategy ${strategyName}`);
-    const space = opts.space || strat.paramSpace || {};
+    const isEnsemble = strategyName === "ensemble";
+    if (!strat && !isEnsemble) throw new Error(`unknown strategy ${strategyName}`);
+    const members = opts.members || this.config.ensembleMembers;
+    const space = opts.space || (strat && strat.paramSpace) || {};
     let combos = cartesian(space);
     if (combos.length > MAX_COMBOS) combos = combos.slice(0, MAX_COMBOS);
 
     const results = [];
     for (const params of combos) {
       try {
-        const r = this.bt.run(series, { strategy: strategyName, params, minConfidence: opts.minConfidence });
+        const r = this.bt.run(series, { strategy: strategyName, params, members, minConfidence: opts.minConfidence });
         results.push({ params, totalReturnPct: r.totalReturnPct, maxDrawdownPct: r.maxDrawdownPct, sharpe: r.sharpe, trades: r.trades, fitness: r.fitness });
       } catch (_) {
         /* skip invalid combo */
@@ -91,9 +93,9 @@ class Optimizer {
       const isSeries = this._sliceSeries(series, start, isEnd);
       const oosSeries = this._sliceSeries(series, isEnd, oosEnd);
 
-      const opt = this.gridSearch(isSeries, strategyName, { minConfidence: opts.minConfidence });
+      const opt = this.gridSearch(isSeries, strategyName, { minConfidence: opts.minConfidence, members: opts.members });
       const bestParams = opt.best ? opt.best.params : {};
-      const oos = this.bt.run(oosSeries, { strategy: strategyName, params: bestParams, minConfidence: opts.minConfidence });
+      const oos = this.bt.run(oosSeries, { strategy: strategyName, params: bestParams, members: opts.members, minConfidence: opts.minConfidence });
 
       combinedOOSReturn *= 1 + oos.totalReturnPct / 100;
       windows.push({

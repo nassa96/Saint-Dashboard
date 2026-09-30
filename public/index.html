@@ -48,6 +48,13 @@
   .t-long{background:rgba(0,255,163,.14);color:var(--green)}
   .t-short{background:rgba(255,77,109,.14);color:var(--red)}
   .t-flat{background:rgba(108,122,156,.14);color:var(--muted)}
+  .t-calm{background:rgba(0,255,163,.14);color:var(--green)}
+  .t-normal{background:rgba(108,122,156,.14);color:var(--muted)}
+  .t-elevated{background:rgba(255,193,7,.16);color:var(--amber)}
+  .t-extreme{background:rgba(255,77,109,.18);color:var(--red)}
+  .t-unknown{background:rgba(108,122,156,.14);color:var(--muted)}
+  .vbar{height:6px;width:70px;background:#1a2337;border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle}
+  .vbar i{display:block;height:100%;background:linear-gradient(90deg,var(--green),var(--amber),var(--red))}
   .t-strong{background:rgba(0,255,163,.16);color:var(--green)}
   .t-promising{background:rgba(74,168,255,.16);color:var(--blue)}
   .t-watch{background:rgba(255,200,87,.14);color:var(--amber)}
@@ -123,6 +130,13 @@
     <div class="card span7"><h3>Strategy Signals <span class="mini">per-symbol routed strategy</span></h3>
       <table><thead><tr><th>Asset</th><th>Strategy</th><th>Signal</th><th>Score</th><th>Conf</th><th>RSI</th><th>Target</th></tr></thead>
       <tbody id="signals"></tbody></table>
+    </div>
+
+    <!-- Extreme Volatility Radar -->
+    <div class="card span12"><h3>Extreme Volatility Radar
+      <span class="mini">EWMA/realized-vol regime, squeeze detection &amp; empirical extreme-move likelihood — statistical estimate, not a guarantee</span></h3>
+      <table><thead><tr><th>Asset</th><th>Regime</th><th>Vol Percentile</th><th>EWMA Vol</th><th>1σ / 2σ Move</th><th>Extreme-Move Likelihood</th><th>Squeeze</th><th>Why</th></tr></thead>
+      <tbody id="volatility"></tbody></table>
     </div>
 
     <!-- Portfolio -->
@@ -249,6 +263,25 @@ function render(d){
       <td><div class="bar"><i style="width:${Math.round((s.confidence||0)*100)}%"></i></div><span class="mini">${(s.confidence*100).toFixed(0)}%</span></td>
       <td>${s.rsi??'—'}</td><td class="mut">${target}</td></tr>`;
   }).join("");
+
+  // extreme volatility radar
+  const vol = d.volatility || {};
+  const volRows = Object.entries(vol).map(([sym,v])=>{
+    if(!v || !v.ready) return `<tr><td>${sym}</td><td colspan="7" class="mut">warming up…</td></tr>`;
+    const r=(v.regime||'unknown').toLowerCase();
+    const likeColor = v.extremeMoveLikelihoodPct>=70?'neg':(v.extremeMoveLikelihoodPct>=40?'':'pos');
+    return `<tr>
+      <td>${sym}</td>
+      <td><span class="tag t-${r}">${v.regime}</span></td>
+      <td>${v.percentile!=null?v.percentile+'th':'—'} <span class="mini mut">(z ${v.zScore??'—'})</span></td>
+      <td>${v.ewmaVolPct!=null?v.ewmaVolPct+'%':'—'}</td>
+      <td class="mini">${v.expectedMove?.oneSigmaPct??'—'}% / ${v.expectedMove?.twoSigmaPct??'—'}%</td>
+      <td><div class="vbar"><i style="width:${Math.round(v.extremeMoveLikelihoodPct||0)}%"></i></div> <span class="${likeColor}">${v.extremeMoveLikelihoodPct}%</span></td>
+      <td>${v.squeeze?'<span class="tag t-elevated">SQUEEZE</span>':'<span class="mut mini">—</span>'}</td>
+      <td class="mini mut">${(v.reasons||[]).join('; ')}</td>
+    </tr>`;
+  }).join("");
+  $("volatility").innerHTML = volRows || `<tr><td colspan="8" class="mut">Warming up…</td></tr>`;
 
   // positions
   $("positions").innerHTML = p.positions.length? p.positions.map(x=>`<tr>

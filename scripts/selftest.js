@@ -8,6 +8,7 @@ const RiskManager = require("../src/risk/riskManager");
 const Allocator = require("../src/portfolio/allocator");
 const PaperBroker = require("../src/paper/broker");
 const MemecoinScanner = require("../src/memecoin/scanner");
+const volatilityRadar = require("../src/volatility/predictor");
 const Engine = require("../src/engine/engine");
 
 let passed = 0;
@@ -22,6 +23,28 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(ind.momentum(rising, 10) > 0, "momentum positive");
   assert(ind.volatility(rising, 20) != null, "volatility");
   ok("indicators compute correctly");
+
+  // extreme volatility radar — real EWMA/realized vol, bounded outputs, no randomness
+  const calmSeries = Array.from({ length: 150 }, (_, i) => 100 + Math.sin(i / 40) * 0.5);
+  const calmRead = volatilityRadar.analyze(calmSeries);
+  assert(calmRead.ready === true, "volatility radar ready with enough bars");
+  assert(calmRead.extremeMoveLikelihoodPct >= 0 && calmRead.extremeMoveLikelihoodPct <= 100, "likelihood bounded 0-100");
+  assert(["CALM", "NORMAL", "ELEVATED", "EXTREME", "UNKNOWN"].includes(calmRead.regime), "regime enum");
+
+  // a violent shock at the tail should read a much higher vol percentile than a flat series
+  const shockSeries = calmSeries.slice();
+  for (let i = 0; i < 8; i++) {
+    const last = shockSeries[shockSeries.length - 1];
+    shockSeries.push(last * (1 + (i % 2 === 0 ? 0.08 : -0.07))); // violent whipsaw
+  }
+  const shockRead = volatilityRadar.analyze(shockSeries);
+  assert(shockRead.ewmaVolPct > calmRead.ewmaVolPct, "shock series reads higher EWMA vol than calm series");
+  assert(shockRead.percentile >= calmRead.percentile, "shock reads at/above calm's vol percentile");
+  assert(typeof shockRead.disclaimer === "string" && /not.*guarantee/i.test(shockRead.disclaimer), "radar is honestly labeled — never claims certainty");
+
+  const tooShort = volatilityRadar.analyze([1, 2, 3]);
+  assert(tooShort.ready === false, "radar refuses to guess on insufficient history");
+  ok("extreme volatility radar computes bounded, honestly-labeled regime reads from real price history");
 
   // strategy detects uptrend
   const s = strategy.evaluate(rising);
@@ -79,6 +102,7 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(state.cycle === 1, "engine ticked");
   assert(state.portfolio.equity > 0, "equity present");
   assert(Array.isArray(state.signals) && state.signals.length === config.universe.length, "signals per symbol");
+  assert(state.volatility && typeof state.volatility === "object", "volatility radar present in engine snapshot");
   ok("engine full pipeline tick completes end-to-end");
 
   // backtester over synthetic history

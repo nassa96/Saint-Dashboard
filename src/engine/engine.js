@@ -9,6 +9,7 @@ const path = require("path");
 
 const MarketData = require("../market/marketData");
 const strategy = require("../signals/strategy");
+const volatilityRadar = require("../volatility/predictor");
 const RiskManager = require("../risk/riskManager");
 const Allocator = require("../portfolio/allocator");
 const PaperBroker = require("../paper/broker");
@@ -45,6 +46,7 @@ class Engine {
     this.lastTick = null;
     this.lastEvaluations = [];
     this.lastTargets = {};
+    this.lastVolatility = {};
     this.chronicle = [];
     this.listeners = [];
 
@@ -100,6 +102,20 @@ class Engine {
       return { symbol, price: prices[symbol]?.price || null, strategy: stratName, ...evalResult };
     });
     this.lastEvaluations = evaluations;
+
+    // 1b) Extreme Volatility Radar — real EWMA/realized-vol regime read per symbol
+    const seriesBySymbol = {};
+    for (const symbol of this.config.universe) seriesBySymbol[symbol] = this.market.getPrices(symbol);
+    this.lastVolatility = volatilityRadar.analyzeUniverse(seriesBySymbol);
+    for (const [symbol, v] of Object.entries(this.lastVolatility)) {
+      if (v.ready && v.regime === "EXTREME" && !this._extremeVolAlerted?.[symbol]) {
+        this._extremeVolAlerted = this._extremeVolAlerted || {};
+        this._extremeVolAlerted[symbol] = true;
+        this.notifier.notifyVolatility?.(symbol, v);
+      } else if (v.ready && v.regime !== "EXTREME" && this._extremeVolAlerted?.[symbol]) {
+        this._extremeVolAlerted[symbol] = false;
+      }
+    }
 
     // 2) Portfolio rotation targets
     const { targets, ranked } = this.allocator.computeTargets(evaluations);
@@ -288,6 +304,7 @@ class Engine {
         reasons: e.reasons,
       })),
       targets: this.lastTargets,
+      volatility: this.lastVolatility,
       portfolio: this.paper.snapshot(this.prices()),
       risk: this.risk.snapshot(),
       memecoins: this.scanner.snapshot(),

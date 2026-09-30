@@ -38,6 +38,27 @@ v2 replaces that core with real, working machinery:
 | Strategy routing | 1 global | Per-symbol / per-strategy routing — momentum on majors, mean-reversion on alts, simultaneously (`config.resolveStrategy`) |
 | Journal & analytics | none | Closed-trade journal + analytics page: win rate, profit factor, expectancy, drawdown, PnL distribution (`src/analytics`, `/analytics.html`) |
 | CI | none | GitHub Actions: self-test on Node 18/20/22 + boot smoke test (`ci/`, see `ci/README.md`) |
+| Volatility forecasting | none | **Extreme Volatility Radar** — real EWMA/realized-vol regime detection, Bollinger-squeeze compression flags, and an empirical (percentile-based) "extreme-move likelihood" score per symbol (`src/volatility/predictor.js`, `/api/volatility`, dashboard panel) |
+
+### Extreme Volatility Radar (honest read)
+No system — ours included — can predict volatility with certainty; markets are
+fat-tailed and regimes can break without warning. What this module *does* do,
+with real math and no randomness:
+
+- **EWMA volatility** (RiskMetrics λ=0.94) — reacts fast to fresh shocks.
+- **Multi-window realized vol** (10/20/60-bar stdev of log returns).
+- **Vol-of-vol** — is volatility itself accelerating (regime destabilizing)?
+- **Bollinger-width squeeze** — historically, tight compression often precedes
+  expansion (a documented pattern, not a promise).
+- **Empirical percentile rank** — where current vol sits vs. its own trailing
+  history, turned into a bounded 0–100 "extreme-move likelihood" score and a
+  CALM / NORMAL / ELEVATED / EXTREME regime label.
+- **Plain-English expected range** — 1σ/2σ move size in % and $ from the
+  current EWMA vol.
+
+Every response carries a `disclaimer` field and the same honesty rule as the
+rest of this repo: it's a statistical estimate from real price history, never
+a guarantee, and never financial advice. See `SAFETY.md`.
 
 ### LIVE vs SIM labeling
 Every price, signal, and candidate is tagged **`LIVE`** or **`SIM`**. If the host
@@ -85,6 +106,7 @@ server.js ──► src/engine/engine.js  (the loop)
                  ├─ src/signals/strategy.js     facade -> strategies/ registry
                  │     └─ strategies/ momentum · meanReversion · ensemble
                  │     └─ paramStore.js         persists tuned params (auto-applied)
+                 ├─ src/volatility/predictor.js Extreme Volatility Radar (EWMA/realized vol, squeeze, regime)
                  ├─ src/risk/riskManager.js     caps, exposure, drawdown breaker
                  ├─ src/portfolio/allocator.js  conviction-weighted rotation targets
                  ├─ src/paper/broker.js         simulated fills @ real prices (default)

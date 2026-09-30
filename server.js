@@ -82,6 +82,7 @@ app.post("/api/tick", async (req, res) => {
 });
 
 app.get("/api/signals", (req, res) => res.json(engine.snapshot().signals));
+app.get("/api/volatility", (req, res) => res.json(engine.lastVolatility || {}));
 app.get("/api/portfolio", (req, res) => res.json(engine.paper.snapshot(engine.prices())));
 app.get("/api/memecoins", (req, res) => res.json(engine.scanner.snapshot()));
 app.get("/api/chronicle", (req, res) => res.json(engine.chronicle.slice(-50).reverse()));

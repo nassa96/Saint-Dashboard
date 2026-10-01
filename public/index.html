@@ -169,7 +169,11 @@
       <div class="navgroup">
         <div class="navlabel">Capital</div>
         <div class="navitem" data-tab="wallet"><span class="ic">◈</span> Wallet &amp; Memecoins</div>
-        <div class="navitem" data-tab="exchanges"><span class="ic">⇌</span> Exchanges</div>
+        <div class="navitem" data-tab="exchanges"><span class="ic">⇌</span> Exchanges &amp; Live Control</div>
+      </div>
+      <div class="navgroup">
+        <div class="navlabel">Performance</div>
+        <div class="navitem" data-tab="journal"><span class="ic">✎</span> Journal &amp; Analytics</div>
       </div>
       <div class="navgroup">
         <div class="navlabel">Ops</div>
@@ -269,6 +273,15 @@
             <tbody id="dnfh-rows"></tbody></table>
             <div id="dnfh-plan-result" class="mini" style="margin-top:8px"></div>
             <div class="mini" style="margin-top:6px">Planning computes the hypothetical spot+perp legs and cost gate only — no funds move. Executing a harvest is an advanced, fully-gated action left to the API (<code>POST /api/dnfh/execute</code>), not exposed here.</div>
+            <div class="divider"></div>
+            <div class="mini mut" style="margin-bottom:6px">Rebalance trigger check — for a HARVEST you already have open (delta drift &gt;1.5% or 3 consecutive negative funding epochs):</div>
+            <div class="formrow">
+              <label>Symbol</label><input id="dnfh-rebal-symbol" class="mini-input" placeholder="BTC" style="width:70px">
+              <label>Spot Px</label><input id="dnfh-rebal-spot" class="mini-input" type="number" style="width:90px">
+              <label>Perp Px</label><input id="dnfh-rebal-perp" class="mini-input" type="number" style="width:90px">
+              <button class="mini-btn" onclick="checkDnfhRebalance()">Check</button>
+            </div>
+            <div id="dnfh-rebal-result" class="mini">No check run yet.</div>
           </div>
 
           <div class="card span12"><h3>AVSS — Asymmetric Volatility Skew Scalper <span class="mini">scan-only cross-venue lag + flow-spike + net-opportunity detector</span>
@@ -331,10 +344,29 @@
       <!-- ===================== WALLET / MEMECOINS ===================== -->
       <div class="tab-pane" data-pane="wallet">
         <div class="grid">
-          <div class="card span12"><h3>On-Chain Wallet (self-custody swaps) <span class="mini" id="wallet-src"></span></h3>
+          <div class="card span12"><h3>On-Chain Wallet (self-custody swaps) <span class="mini" id="wallet-src"></span>
+            <a class="mini-btn" href="/connect.html" style="text-decoration:none">Manage keys →</a></h3>
             <table><thead><tr><th>Network</th><th>Wallet Address</th><th>Key</th><th>Quotes</th><th>Swaps</th></tr></thead>
             <tbody id="wallet"></tbody></table>
             <div class="mini" id="wallet-note" style="margin-top:8px"></div>
+          </div>
+
+          <div class="card span12"><h3>Connect a Wallet From Your Browser <span class="mini">read-only — public address only, never a seed phrase or signature</span></h3>
+            <div class="infobox">Asks your wallet extension for its PUBLIC address only. No funds can move from this — it's the safest possible way to just look at a balance on the dashboard. Private keys for actual server-side execution are set once in <code>.env</code> and managed on the Connect page, never typed into a web form.</div>
+            <div class="formrow">
+              <button class="mini-btn" onclick="connectInjectedEvm()">🦊 MetaMask / Coinbase Wallet / Trust Wallet</button>
+              <button class="mini-btn" onclick="connectPhantom()">👻 Phantom (Solana)</button>
+            </div>
+            <div class="formrow">
+              <label>Chain</label>
+              <select id="manual-chain" class="mini-select">
+                <option value="tron">Tron</option><option value="ethereum">Ethereum</option>
+                <option value="base">Base</option><option value="bsc">BNB Chain</option><option value="solana">Solana</option>
+              </select>
+              <input id="manual-address" class="mini-input" style="width:300px" placeholder="paste a PUBLIC address (never a seed phrase or private key)">
+              <button class="mini-btn go" onclick="lookupManualWallet()">Look up balance</button>
+            </div>
+            <div id="connected-wallets" style="margin-top:8px"></div>
           </div>
 
           <div class="card span12"><h3>MEV / Sandwich-Exposure Assessment <span class="mini">read-only — never moves funds</span></h3>
@@ -368,6 +400,26 @@
             <div class="mini" style="margin-top:8px" id="live-note"></div>
           </div>
 
+          <div class="card span7" id="live-card"><h3>⚡ Live Trading Control <span class="mini">armed = real orders with real money</span></h3>
+            <div id="live-status" class="mini">—</div>
+            <div class="warnbox" id="live-warnbox" style="display:none;margin:10px 0 0"></div>
+            <div id="live-controls" style="margin-top:10px"></div>
+            <div id="live-result" class="mini" style="margin-top:6px"></div>
+            <div class="divider"></div>
+            <div class="formrow">
+              <label>Rotation engine:</label>
+              <span id="engine-run-state" class="mini">—</span>
+              <button class="mini-btn go" onclick="engineControl('start')">Start</button>
+              <button class="mini-btn danger" onclick="engineControl('stop')">Stop</button>
+            </div>
+          </div>
+
+          <div class="card span12"><h3>Exchange API Keys &amp; Balances <span class="mini">read+trade scoped keys only — never enable withdrawals</span>
+            <button class="mini-btn" onclick="loadExchangeBalances()">Refresh Balances</button></h3>
+            <div class="warnbox" style="display:block;margin:0 0 12px">🔒 Only paste API keys with withdrawals DISABLED. Keys are saved server-side to data/credentials.json (git-ignored) and stay read-only until you arm live trading above. Full key-management UI (with setup instructions) also lives at <a href="/connect.html">/connect.html</a>.</div>
+            <div id="venues-mgmt"></div>
+          </div>
+
           <div class="card span7"><h3>HyperLiquid — Manual Leveraged Order <span class="mini">monitor-only venue; auto-rotation never trades here</span></h3>
             <div class="infobox">This is a deliberately manual, advanced action — the automatic rotation engine never places HyperLiquid orders on its own. Routes through the same live-arm gates as everything else; stays a PAPER-safe no-op until armed.</div>
             <div class="formrow">
@@ -379,6 +431,23 @@
               <button class="mini-btn danger" onclick="placeHlOrder()">Place Order</button>
             </div>
             <div id="hl-result" class="mini">No order placed.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== JOURNAL & ANALYTICS ===================== -->
+      <div class="tab-pane" data-pane="journal">
+        <div class="grid">
+          <div class="card span12"><h3>Closed-Trade Analytics <span class="mini">computed from the paper ledger's round-trip trades</span>
+            <button class="mini-btn" onclick="loadAnalytics()">Refresh</button>
+            <a class="mini-btn" href="/analytics.html" style="text-decoration:none">Full charts →</a></h3>
+            <div id="analytics-kpis" style="display:flex;gap:22px;flex-wrap:wrap;margin:6px 0 14px">—</div>
+            <div id="analytics-symbols"></div>
+          </div>
+
+          <div class="card span12"><h3>Trade Journal <span class="mini">most recent closed round-trips</span></h3>
+            <table><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>PnL %</th><th>Hold</th></tr></thead>
+            <tbody id="journal-rows"></tbody></table>
           </div>
         </div>
       </div>
@@ -919,6 +988,192 @@ async function assessMev(){
   }catch(e){$("mev-result").innerHTML=`<span class="neg">${e.message}</span>`;}
 }
 
+// ---- DNFH rebalance-check ----
+async function checkDnfhRebalance(){
+  const symbol=$("dnfh-rebal-symbol").value.trim().toUpperCase();
+  const spotPx=$("dnfh-rebal-spot").value, perpPx=$("dnfh-rebal-perp").value;
+  if(!symbol||!spotPx||!perpPx){$("dnfh-rebal-result").innerHTML=`<span class="neg">symbol, spot px and perp px are all required.</span>`;return;}
+  $("dnfh-rebal-result").innerHTML=`Checking…`;
+  try{
+    const r=await fetch(`/api/dnfh/rebalance-check?symbol=${encodeURIComponent(symbol)}&spotPx=${spotPx}&perpPx=${perpPx}`);
+    const d=await r.json();
+    if(d.error){$("dnfh-rebal-result").innerHTML=`<span class="neg">${d.error}</span>`;return;}
+    $("dnfh-rebal-result").innerHTML = `<span class="${d.shouldRebalance?'warn-txt':'pos'}">${d.shouldRebalance?'REBALANCE SUGGESTED':'no rebalance needed'}</span>`+
+      (d.reasons&&d.reasons.length?` — ${d.reasons.join('; ')}`:'');
+  }catch(e){$("dnfh-rebal-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- Wallet: browser connect + manual address lookup (public address ONLY) ----
+function renderConnectedWallet(label, address, result){
+  const el=$("connected-wallets");
+  const bal = result?.balances?.map(b=>`${b.asset}: ${Number(b.free).toLocaleString(undefined,{maximumFractionDigits:6})}`).join(' · ') || (result?.error||'no balance data');
+  const div=document.createElement('div');
+  div.innerHTML=`<div class="formrow" style="margin:4px 0"><b>${label}</b> <span class="mini mut">${address}</span></div><div class="mini" style="margin:0 0 8px">${bal}</div>`;
+  el.prepend(div);
+}
+async function connectInjectedEvm(){
+  if(!window.ethereum){alert('No injected EVM wallet found. Install MetaMask, Coinbase Wallet, or Trust Wallet.');return;}
+  try{
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const address = accounts[0];
+    const r = await fetch('/api/wallet/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain:'ethereum',address})});
+    const result = await r.json();
+    renderConnectedWallet('EVM wallet (Ethereum shown; same address works on Base/BNB)', address, result);
+  }catch(e){alert('Connect failed/rejected: '+e.message);}
+}
+async function connectPhantom(){
+  if(!window.solana || !window.solana.isPhantom){alert('Phantom not found. Install the Phantom extension.');return;}
+  try{
+    const resp = await window.solana.connect();
+    const address = resp.publicKey.toString();
+    const r = await fetch('/api/wallet/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain:'solana',address})});
+    const result = await r.json();
+    renderConnectedWallet('Phantom (Solana)', address, result);
+  }catch(e){alert('Connect failed/rejected: '+e.message);}
+}
+async function lookupManualWallet(){
+  const chain=$("manual-chain").value;
+  const address=($("manual-address").value||'').trim();
+  if(!address){alert('Paste a public address first.');return;}
+  try{
+    const r = await fetch('/api/wallet/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain,address})});
+    const result = await r.json();
+    renderConnectedWallet(chain, address, result);
+  }catch(e){alert('Lookup failed: '+e.message);}
+}
+
+// ---- Exchange balances + key management (read+trade scoped keys only) ----
+const VENUE_META={coinbase:{needsPass:true},kraken:{needsPass:false},binanceus:{needsPass:false}};
+async function loadExchangeBalances(){
+  $("venues-mgmt").innerHTML = `<span class="mut">loading…</span>`;
+  try{
+    const [all,health] = await Promise.all([
+      fetch('/api/exchanges/balances/all').then(r=>r.json()),
+      fetch('/api/exchanges/health').then(r=>r.json()),
+    ]);
+    const fees = all.fees||{};
+    $("venues-mgmt").innerHTML = Object.keys(VENUE_META).map(name=>{
+      const v = (all.venues||{})[name] || {};
+      const h = health[name] || {};
+      const connected = v.note !== "no API keys configured" && !v.error;
+      const f = fees[name];
+      const feeTxt = f ? `${f.label||name}: ${f.maker}% / ${f.taker}% (maker/taker)` : '';
+      const balRows = (v.balances||[]).filter(b=>Number(b.free)>0||Number(b.total)>0).slice(0,8)
+        .map(b=>`<span class="flag">${b.asset} ${fmt(b.free??b.total,4)}</span>`).join(' ') || '<span class="mut mini">no balances (or no keys)</span>';
+      return `<div class="formrow" style="align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:10px">
+        <div style="min-width:90px"><b>${name}</b>${name===health.primary?' <span class="mini mut">(primary)</span>':''}</div>
+        <div>
+          <div class="mini">${connected?'<span class="pos">🔑 keys saved</span>':'<span class="mut">no keys</span>'} · ${h.reachable?'<span class="pos">✓ reachable</span>':'<span class="warn-txt">⚠ unreachable</span>'} <span class="mut">${feeTxt}</span></div>
+          <div style="margin:6px 0">${balRows}</div>
+          <div class="formrow" style="margin:4px 0">
+            <input id="k-${name}" class="mini-input" placeholder="API key" autocomplete="off">
+            <input id="s-${name}" class="mini-input" placeholder="API secret" type="password" autocomplete="off">
+            ${VENUE_META[name].needsPass?`<input id="p-${name}" class="mini-input" placeholder="passphrase" type="password" autocomplete="off">`:''}
+            <button class="mini-btn go" onclick="connectVenue('${name}')">Save &amp; verify</button>
+            ${connected?`<button class="mini-btn danger" onclick="disconnectVenue('${name}')">Disconnect</button>`:''}
+          </div>
+          <div class="mini" id="venue-res-${name}"></div>
+        </div>
+      </div>`;
+    }).join("");
+  }catch(e){$("venues-mgmt").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+async function connectVenue(name){
+  const body={venue:name, key:$("k-"+name).value.trim(), secret:$("s-"+name).value.trim()};
+  if(VENUE_META[name].needsPass) body.passphrase=($("p-"+name).value||'').trim();
+  $("venue-res-"+name).innerHTML=`Saving &amp; verifying…`;
+  try{
+    const r=await fetch('/api/exchanges/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    $("venue-res-"+name).innerHTML = d.error? `<span class="neg">⚠ ${d.error}</span>` : `<span class="pos">✓ saved — reachable=${d.reachable} balancesOk=${d.balancesOk}</span>${d.error?(' — '+d.error):''}`;
+    loadExchangeBalances();
+  }catch(e){$("venue-res-"+name).innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+async function disconnectVenue(name){
+  if(!confirm(`Disconnect ${name}? This removes its saved keys.`))return;
+  try{ await fetch('/api/exchanges/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({venue:name})}); loadExchangeBalances(); }catch(e){alert(e.message);}
+}
+
+// ---- Live trading arm/disarm + engine start/stop ----
+async function loadLive(){
+  try{
+    const r=await fetch('/api/live/status'); const s=await r.json();
+    const armed = s.canTradeLive;
+    $("live-card").style.borderColor = armed ? 'rgba(255,77,109,.7)' : 'var(--line)';
+    $("live-status").innerHTML = `
+      <span class="tag ${armed?'t-rejected':'t-approved'}">${armed?'🔴 LIVE — REAL ORDERS':'🟢 PAPER (safe)'}</span>
+      <span class="mini"> · ${s.primary} ${s.primaryConnected?'connected':'not connected'} · ${s.useTestnet?'TESTNET':'real markets'} · ${s.authEnabled?'password set':'⚠ no dashboard password'}</span>
+      ${s.armedAt?`<div class="mini">armed ${new Date(s.armedAt).toLocaleString()}</div>`:''}
+    `;
+    if(armed){
+      $("live-controls").innerHTML = `<button class="mini-btn danger" style="font-size:13px;padding:8px 16px" onclick="disarmLive()">■ DISARM — stop live trading now</button>`;
+    } else {
+      $("live-controls").innerHTML = `
+        <div class="mini" style="margin-bottom:6px">To arm, type the exact phrase <code>I ACCEPT THE RISK</code>:</div>
+        <div class="formrow">
+          <input id="arm-phrase" class="mini-input" style="width:220px" placeholder="I ACCEPT THE RISK" autocomplete="off">
+          <button class="mini-btn danger" onclick="armLive()">⚡ Arm live trading</button>
+        </div>`;
+    }
+  }catch(e){$("live-status").innerHTML=`<span class="neg">${e.message}</span>`;}
+  try{
+    const r2=await fetch('/api/state'); const d2=await r2.json();
+    $("engine-run-state").innerHTML = d2.running? '<span class="pos">RUNNING</span>' : '<span class="mut">STOPPED</span>';
+  }catch(_){}
+}
+async function armLive(){
+  const confirmPhrase = ($("arm-phrase").value||'').trim();
+  if(!confirm('This will place REAL orders with REAL money. Continue?'))return;
+  $("live-result").innerHTML = `Arming…`;
+  try{
+    const r=await fetch('/api/live/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:confirmPhrase})});
+    const d=await r.json();
+    if(d.error){$("live-result").innerHTML=`<span class="neg">⚠ ${d.error}</span>`;}
+    else{
+      $("live-result").innerHTML = `<span class="pos">✅ Live trading ARMED.</span>`;
+      if(d.warnings&&d.warnings.length){$("live-warnbox").style.display='block';$("live-warnbox").innerHTML='⚠ '+d.warnings.join('<br>⚠ ');}
+    }
+  }catch(e){$("live-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+  loadLive();
+}
+async function disarmLive(){
+  $("live-result").innerHTML = `Disarming…`;
+  try{ await fetch('/api/live/disarm',{method:'POST'}); $("live-result").innerHTML=`🟢 Disarmed — back to safe PAPER mode.`; $("live-warnbox").style.display='none'; }catch(e){$("live-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+  loadLive();
+}
+async function engineControl(action){
+  try{ await fetch(`/api/engine/${action}`,{method:'POST'}); loadLive(); }catch(e){alert(e.message);}
+}
+
+// ---- Journal & analytics ----
+async function loadAnalytics(){
+  $("analytics-kpis").innerHTML = `<span class="mut">loading…</span>`;
+  try{
+    const r=await fetch('/api/analytics'); const d=await r.json();
+    const m=(label,val,c)=>`<div><div class="mini">${label}</div><div class="kpi small ${c||''}">${val}</div></div>`;
+    $("analytics-kpis").innerHTML =
+      m('Total Trades', d.totalTrades)+
+      m('Win Rate', d.winRatePct+'%', d.winRatePct>=50?'pos':'neg')+
+      m('Net PnL', money(d.netPnl), cls(d.netPnl))+
+      m('Profit Factor', d.profitFactor??'∞')+
+      m('Expectancy', money(d.expectancy), cls(d.expectancy))+
+      m('Avg Win / Loss', `${money(d.avgWin)} / -${money(d.avgLoss)}`)+
+      m('Max Drawdown', '-'+d.maxDrawdownPct+'%', 'neg')+
+      m('Avg Hold', d.avgHoldMinutes+'m');
+    const symRows = (d.symbolStats||[]).map(s=>`<div class="mini">${s.symbol}: ${s.trades} trades · win ${s.winRatePct}% · pnl <span class="${cls(s.pnl)}">${money(s.pnl)}</span></div>`).join("") || `<div class="mini mut">no closed trades yet</div>`;
+    $("analytics-symbols").innerHTML = `<div class="mini mut" style="margin-bottom:4px">PER-SYMBOL</div>${symRows}`;
+    // journal table from the same recentTrades the analytics endpoint already computed
+    $("journal-rows").innerHTML = (d.recentTrades||[]).length ? d.recentTrades.map(t=>`<tr>
+      <td class="mini">${new Date(t.ts).toLocaleString()}</td>
+      <td>${t.symbol}</td><td class="mut">LONG</td>
+      <td>${shortP(t.entryPrice)}</td><td>${shortP(t.exitPrice)}</td>
+      <td class="${cls(t.pnl)}">${money(t.pnl)}</td>
+      <td class="${cls(t.pnlPct)}">${pct(t.pnlPct)}</td>
+      <td class="mini">${t.holdMs?(t.holdMs/60000).toFixed(1)+'m':'—'}</td></tr>`).join("")
+      : `<tr><td colspan="8" class="mut">No closed trades yet.</td></tr>`;
+  }catch(e){$("analytics-kpis").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
 // ---- HyperLiquid manual order ----
 async function placeHlOrder(){
   const symbol=$("hl-symbol").value.trim().toUpperCase();
@@ -994,9 +1249,14 @@ window.addEventListener('saint-tab-shown', (e)=>{
   if(tab==='yield'){ scanDnfh(); scanAvss(); loadCapitalRing(); }
   if(tab==='overview'){ loadCapitalRing(); }
   if(tab==='lab'){ loadParams(); }
+  if(tab==='exchanges'){ loadLive(); loadExchangeBalances(); }
+  if(tab==='journal'){ loadAnalytics(); }
 });
 // Overview's Capital Ring card loads once on initial boot too.
 setTimeout(()=>loadCapitalRing(), 1200);
+// Live-control status needs to stay fresh even when its tab isn't open,
+// since arming/disarming can happen from /connect.html in another tab too.
+setInterval(()=>{ if(document.querySelector('.navitem[data-tab="exchanges"]').classList.contains('active')) loadLive(); }, 8000);
 </script>
 </body>
 </html>

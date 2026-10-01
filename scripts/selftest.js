@@ -11,7 +11,7 @@ const MemecoinScanner = require("../src/memecoin/scanner");
 const volatilityRadar = require("../src/volatility/predictor");
 const marketMaking = require("../src/signals/strategies/marketMaking");
 const fibonacci = require("../src/signals/strategies/fibonacci");
-const { sortinoRatio } = require("../src/portfolio/sortino");
+const { sortinoRatio, downsideDeviation, sortinoScalar, kellyFraction, kellySortinoFraction } = require("../src/portfolio/sortino");
 const mevDefense = require("../src/wallet/mevDefense");
 const HyperLiquid = require("../src/exchange/hyperliquid");
 const ExchangeManager = require("../src/exchange/manager");
@@ -96,6 +96,27 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(b.approved === false, "low-conf trade rejected");
   ok("risk manager gates by confidence + exposure");
 
+  // micro-capital cold-start: absolute MAX_TRADE_USD ceiling, independent
+  // of (and tighter than) the percentage-based caps
+  const rmCapped = new RiskManager({ capital: { ...config.capital, maxTradeUsd: 5 } });
+  const cappedAssess = rmCapped.assess({ signal: "LONG", confidence: 0.9, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(cappedAssess.approved === true && cappedAssess.maxNotional <= 5, "MAX_TRADE_USD caps notional size regardless of how much room the percentage caps would otherwise allow");
+  ok("risk manager enforces an absolute MAX_TRADE_USD ceiling for micro-capital cold-start mode");
+
+  // rolling 24h drawdown-halt cooldown — must NOT clear just because
+  // midnight passed; only clears once its own cooldown timestamp elapses
+  const rm3 = new RiskManager({ capital: { ...config.capital, maxDailyDrawdownPct: 0.03, haltCooldownHours: 24 } });
+  rm3.updateEquity(10000);
+  rm3.updateEquity(9600); // 4% drawdown >= 3% limit -> halts
+  assert(rm3.halted === true && rm3.haltUntil > Date.now(), "drawdown halt sets a rolling cooldown ~24h out, not just a same-day flag");
+  rm3.dayKey = "2000-01-01"; // simulate the next tick crossing a calendar-day boundary
+  rm3.updateEquity(9600);
+  assert(rm3.halted === true, "halt survives a calendar-day rollover — no longer clears just because midnight passed");
+  rm3.haltUntil = Date.now() - 1000; // simulate the 24h cooldown having actually elapsed
+  rm3.updateEquity(9600);
+  assert(rm3.halted === false, "halt clears once its own rolling cooldown has actually elapsed");
+  ok("risk manager uses a true rolling cooldown for the daily-drawdown halt instead of clearing at the next calendar day");
+
   // risk manager — volatility-regime-aware sizing (operationalizes the
   // Extreme Volatility Radar instead of just alerting on it)
   const rmVol = new RiskManager(config);
@@ -179,6 +200,17 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   );
   assert(sortinoTargets["SMOOTH"] > sortinoTargets["JAGGED"], "sortino mode sizes up the smoother ride at equal score");
   ok("Sortino-ratio allocation mode rewards lower downside risk at equal conviction");
+
+  // AWP Kelly-Sortino position sizing: f* = (p*b - q)/b * sortino_scalar
+  assert(Math.abs(downsideDeviation(smoothUp) - 0) < 1e-9 || downsideDeviation(smoothUp) != null, "downsideDeviation computes from a price series");
+  assert(kellyFraction(0.6, 2) > 0, "positive-edge bet gets a positive Kelly fraction");
+  assert(kellyFraction(0.4, 1) === 0, "negative-edge bet clamps to a zero Kelly fraction (never sizes against your own edge)");
+  assert(sortinoScalar(0.01, 0.01) === 0.35, "sortino scalar clamps to the ceiling when target == realized (raw ratio 1.0 is above the 0.35 cap)");
+  assert(sortinoScalar(0.005, 0.05) === 0.1, "sortino scalar clamps to the floor when realized downside vol is far hotter than target");
+  assert(sortinoScalar(0.05, 0.005) === 0.35, "sortino scalar clamps to the ceiling when realized downside vol is far calmer than target");
+  const sized = kellySortinoFraction({ winProb: 0.6, winLossRatio: 2, targetDownsideVol: 0.01, realizedDownsideDeviation: 0.02 });
+  assert(sized.sizedFraction > 0 && sized.sizedFraction < sized.kellyFraction, "Kelly-Sortino sized fraction is a damped (smaller) version of the raw Kelly fraction");
+  ok("Sortino-Kelly position sizing (AWP spec) computes a bounded, edge-gated, volatility-damped bet fraction");
 
   // Avellaneda-Stoikov (spot-adapted) market-making strategy
   const flatSeries = Array.from({ length: 80 }, () => 100 + (Math.random() - 0.5) * 0.01);

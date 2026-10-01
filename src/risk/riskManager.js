@@ -44,6 +44,7 @@ class RiskManager {
     this.stressInfo = { fraction: 0, extremeCount: 0, total: 0 };
     this.dayStartEquity = config.capital.startingEquity;
     this.dayKey = new Date().toISOString().slice(0, 10);
+    this.haltUntil = null; // rolling cooldown timestamp (ms) — set when a drawdown halt triggers
   }
 
   _rollDay(equity) {
@@ -51,19 +52,35 @@ class RiskManager {
     if (key !== this.dayKey) {
       this.dayKey = key;
       this.dayStartEquity = equity;
+      // NOTE: the calendar-day rollover resets the drawdown MEASUREMENT
+      // baseline (a fresh day's "started at $X" reference) but deliberately
+      // does NOT clear an active halt anymore — see _checkHaltCooldown().
+      // A halt triggered at 11:58pm used to clear 2 minutes later at
+      // midnight; that defeated the point of a drawdown breaker. The halt
+      // now only clears once its own rolling cooldown has actually elapsed.
+    }
+  }
+
+  /** Rolling cooldown clear — independent of calendar-day boundaries. */
+  _checkHaltCooldown() {
+    if (this.halted && this.haltUntil && Date.now() >= this.haltUntil) {
       this.halted = false;
       this.haltReason = null;
+      this.haltUntil = null;
     }
   }
 
   updateEquity(equity) {
     this._rollDay(equity);
+    this._checkHaltCooldown();
     const dd = (this.dayStartEquity - equity) / this.dayStartEquity;
     if (dd >= this.cfg.maxDailyDrawdownPct && !this.halted) {
       this.halted = true;
+      const cooldownHours = Number(this.cfg.haltCooldownHours) || 24;
+      this.haltUntil = Date.now() + cooldownHours * 60 * 60 * 1000;
       this.haltReason = `Daily drawdown ${(dd * 100).toFixed(1)}% >= limit ${(
         this.cfg.maxDailyDrawdownPct * 100
-      ).toFixed(1)}%`;
+      ).toFixed(1)}% — halted for a rolling ${cooldownHours}h cooldown (clears ${new Date(this.haltUntil).toISOString()})`;
     }
     return { dd, halted: this.halted };
   }
@@ -158,7 +175,13 @@ class RiskManager {
     const maxSymbol = equity * this.cfg.maxPositionPct * sizeFactor;
     const roomSymbol = Math.max(0, maxSymbol - symbolExposure);
     const roomPortfolio = Math.max(0, maxPortfolio - currentExposure);
-    const maxNotional = Math.min(roomSymbol, roomPortfolio);
+    let maxNotional = Math.min(roomSymbol, roomPortfolio);
+
+    // Micro-capital cold-start mode: absolute dollar ceiling, independent of
+    // (and tighter than, when configured) the percentage-based caps above.
+    if (Number(this.cfg.maxTradeUsd) > 0) {
+      maxNotional = Math.min(maxNotional, Number(this.cfg.maxTradeUsd));
+    }
 
     if (maxNotional < price * 0.0001) {
       return {
@@ -183,6 +206,7 @@ class RiskManager {
     return {
       halted: this.halted,
       haltReason: this.haltReason,
+      haltUntil: this.haltUntil ? new Date(this.haltUntil).toISOString() : null,
       stressHalted: this.stressHalted,
       stressReason: this.stressReason,
       stress: this.stressInfo,

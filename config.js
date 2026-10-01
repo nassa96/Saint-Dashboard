@@ -95,6 +95,20 @@ const config = {
     // up a bit in RISK_ON — bounded, never more than a modest tilt. Set to
     // false to disable and always deploy at the raw allocator target.
     macroOverlayEnabled: bool(process.env.MACRO_OVERLAY_ENABLED, true),
+    // Micro-capital cold-start mode: an ABSOLUTE dollar ceiling per trade,
+    // independent of (and in addition to) the percentage-based caps above.
+    // Percentage caps alone are meaningless as a cold-start safety rail —
+    // e.g. starting equity could be set well above the tiny size you
+    // actually want to risk while a strategy is unproven. 0 = disabled
+    // (percentage caps only, the historical default behavior).
+    maxTradeUsd: num(process.env.MAX_TRADE_USD, 0),
+    // Daily-drawdown halt cooldown: once maxDailyDrawdownPct is breached,
+    // stay halted for this many hours on a true ROLLING clock (haltUntil =
+    // triggerTime + this many hours) rather than clearing at the next
+    // calendar-day boundary, which could be under an hour away if the
+    // breach happens late in the day. Matches the Market Overlord cold-start
+    // spec's explicit "halts for 24 hours."
+    haltCooldownHours: num(process.env.HALT_COOLDOWN_HOURS, 24),
   },
 
   universe: list(process.env.TRADE_UNIVERSE, [

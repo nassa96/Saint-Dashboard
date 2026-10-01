@@ -13,6 +13,7 @@ const { WebSocketServer } = require("ws");
 const config = require("./config");
 const Engine = require("./src/engine/engine");
 const Backtester = require("./src/backtest/backtester");
+const SyntheticValidator = require("./src/backtest/syntheticValidator");
 const Optimizer = require("./src/backtest/optimizer");
 const { buildSeries } = require("./src/backtest/history");
 const analytics = require("./src/analytics/analytics");
@@ -215,6 +216,30 @@ app.post("/api/backtest", async (req, res) => {
   }
 });
 app.get("/api/backtest/last", (req, res) => res.json(_btCache || { note: "no backtest run yet" }));
+
+// Stage 2 cold-start gate: block-bootstrap synthetic path validation.
+// Runs are capped here for HTTP responsiveness — the underlying module
+// defaults to the full spec'd 10,000 runs when called directly/offline;
+// this endpoint trades that down for a request that actually returns.
+app.post("/api/validate/synthetic", async (req, res) => {
+  try {
+    const bars = Math.min(1000, Math.max(80, Number(req.body?.bars || 400)));
+    const gran = Number(req.body?.granularity || 3600);
+    const runs = Math.min(2000, Math.max(20, Number(req.body?.runs || 200)));
+    const { series } = await buildSeries(config.universe, bars, gran);
+    const validator = new SyntheticValidator(config);
+    const result = validator.validate(series, {
+      runs,
+      blockSize: Number(req.body?.blockSize || 10),
+      sortinoThreshold: Number(req.body?.sortinoThreshold || 1.8),
+      passRateThreshold: Number(req.body?.passRateThreshold || 0.95),
+      strategy: req.body?.strategy,
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 
 // List available strategies
 app.get("/api/strategies", (req, res) => {

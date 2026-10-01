@@ -43,12 +43,20 @@ as done.
   the halt only cleared at the next calendar-day boundary, which could be
   under an hour away).
 - **Stage 2 — synthetic validation (10k block-bootstrap paths, Sortino>1.8
-  gate)**: **not yet implemented this round** — tracked as a follow-up. It
-  would extend `src/backtest/backtester.js` with a block-bootstrap resampler
-  over recent price history (not raw order-book snapshots — those aren't
-  stored anywhere in this app; that substitution will be documented
-  honestly if/when it's built) and gate "autonomous eligibility" on the
-  Sortino ratio clearing 1.8 across ≥95% of resampled runs.
+  gate)**: implemented — `src/backtest/syntheticValidator.js` (`POST
+  /api/validate/synthetic`). Resamples the recent CLOSE-PRICE history this
+  app already keeps into thousands of synthetic paths via block-bootstrap
+  (overlapping blocks of real consecutive returns, same block indices
+  reused across symbols per run to preserve cross-symbol co-movement), runs
+  each through the SAME backtester/allocator/strategy used live, and gates
+  `autonomousEligible` on Sortino clearing `sortinoThreshold` (default 1.8)
+  across `passRateThreshold` (default 95%) of valid runs. **Honest
+  substitution**: the spec said "resample order-book snapshots" — this app
+  stores no order-book history anywhere, so it resamples price history
+  instead; `syntheticValidator.js`'s header explains why. The module
+  defaults to the full spec'd 10,000 runs when called directly; the HTTP
+  endpoint caps it lower (default 200, max 2,000) purely so the request
+  actually returns in a reasonable time.
 - **Stage 3 — execution hygiene**: already the app's default posture —
   there is no market-order code path anywhere in this codebase (HyperLiquid
   and every exchange connector route limit/post-only orders), and

@@ -22,6 +22,7 @@ const AvssScanner = require("../src/signals/avss");
 const dnfhStore = require("../src/yield/dnfhStore");
 const macroFlow = require("../src/intelligence/flow");
 const Engine = require("../src/engine/engine");
+const SyntheticValidator = require("../src/backtest/syntheticValidator");
 
 let passed = 0;
 const ok = (name) => { console.log("  ✓", name); passed++; };
@@ -531,6 +532,43 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(bt.bars > 0 && bt.equityCurve.length === bt.bars, "backtest produces curve");
   assert(typeof bt.sharpe === "number" && typeof bt.maxDrawdownPct === "number", "backtest metrics");
   ok("backtester runs strategy over history + reports metrics");
+
+  // Stage 2 cold-start gate: block-bootstrap synthetic path validation
+  const svConfig = config;
+  const validator = new SyntheticValidator(svConfig);
+
+  const strongUp = (n, start, drift) => {
+    const out = [start];
+    let px = start;
+    for (let i = 1; i < n; i++) {
+      px = px * (1 + drift);
+      out.push(px);
+    }
+    return out;
+  };
+  const trendingSeries = { "BTC-USD": strongUp(150, 100, 0.01), "ETH-USD": strongUp(150, 50, 0.009) };
+  const trendingResult = validator.validate(trendingSeries, { runs: 60, strategy: "momentum", seed: 7 });
+  assert(trendingResult.validRuns > 0, "synthetic validator produces valid runs from a real price series");
+  assert(trendingResult.passRate > 0 && trendingResult.autonomousEligible === true, "a strategy that wins consistently across resampled paths clears the Stage 2 autonomous-eligibility gate");
+  assert(/block-bootstrap/.test(trendingResult.method) && /NOT raw order-book/.test(trendingResult.method), "synthetic validator honestly discloses it resamples price history, not raw order-book snapshots");
+
+  const choppy = (n, start) => {
+    const out = [start];
+    let px = start;
+    for (let i = 1; i < n; i++) {
+      px = px * (1 + (Math.sin(i * 1.3) + Math.sin(i * 0.7)) * 0.01);
+      out.push(px);
+    }
+    return out;
+  };
+  const choppySeries = { "BTC-USD": choppy(150, 100), "ETH-USD": choppy(150, 50) };
+  const choppyResult = validator.validate(choppySeries, { runs: 60, strategy: "momentum", seed: 7 });
+  assert(choppyResult.autonomousEligible === false, "a strategy with no durable edge on a choppy market fails to clear the Stage 2 gate");
+  assert(choppyResult.passRate < trendingResult.passRate, "a genuinely strong edge passes the synthetic gate at a materially higher rate than a choppy, edge-less market");
+
+  const sameSeedResult = validator.validate(trendingSeries, { runs: 60, strategy: "momentum", seed: 7 });
+  assert(sameSeedResult.passRate === trendingResult.passRate, "a fixed seed reproduces the exact same synthetic run set (deterministic, auditable)");
+  ok("Stage 2 synthetic validator (block-bootstrap resampling) gates autonomous eligibility on Sortino >= threshold across the configured pass rate");
 
   // wallet gate must be OFF by default
   const WalletManager = require("../src/wallet/manager");

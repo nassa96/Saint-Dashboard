@@ -357,6 +357,18 @@ app.post("/api/dnfh/execute", async (req, res) => {
   }
 });
 
+// Macro risk-appetite overlay (Fear & Greed + global market-cap trend) —
+// fully read-only, cached. Used internally to throttle (never boost)
+// deployed capital; exposed here too so the dashboard can show it.
+const macroFlow = require("./src/intelligence/flow");
+app.get("/api/intelligence/flow", async (req, res) => {
+  try {
+    res.json(await macroFlow.getFlow({ forceRefresh: req.query?.refresh === "1" }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Alerts: status + send a test message through configured channels
 app.get("/api/alerts/status", (req, res) => res.json(engine.notifier.status()));
 app.post("/api/alerts/test", async (req, res) => {

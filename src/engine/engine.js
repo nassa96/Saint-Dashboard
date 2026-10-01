@@ -17,6 +17,7 @@ const MemecoinScanner = require("../memecoin/scanner");
 const ExchangeManager = require("../exchange/manager");
 const WalletManager = require("../wallet/manager");
 const DnfhEngine = require("../yield/dnfh");
+const macroFlow = require("../intelligence/flow");
 const Notifier = require("../alerts/notifier");
 const log = require("../util/logger");
 
@@ -51,6 +52,10 @@ class Engine {
     this.lastEvaluations = [];
     this.lastTargets = {};
     this.lastVolatility = {};
+    // Macro risk-appetite overlay — refreshed on its own slow cadence (see
+    // start()), read synchronously each tick. Starts neutral/no-effect
+    // until the first background refresh completes.
+    this.lastMacroFlow = { ready: false, regime: "UNKNOWN", deployMultiplier: 1 };
     this.chronicle = [];
     this.listeners = [];
 
@@ -132,13 +137,18 @@ class Engine {
     }
 
     // 2) Portfolio rotation targets (Sortino mode reuses the same
-    // per-symbol series the volatility radar just computed).
-    const { targets, ranked } = this.allocator.computeTargets(evaluations, { seriesBySymbol });
+    // per-symbol series the volatility radar just computed; the macro
+    // overlay can only ever shrink total deployment, never grow it).
+    const { targets, ranked } = this.allocator.computeTargets(evaluations, {
+      seriesBySymbol,
+      macro: this.lastMacroFlow,
+    });
     this.lastTargets = targets;
 
     // 3) Risk + rebalance toward targets
     const equity = this.paper.equity(prices);
     this.risk.updateEquity(equity);
+    this.risk.updateMarketStress(this.lastVolatility);
     const minTradeUsd = this.config.capital.minTradeUsd || 1;
     const actions = [];
 
@@ -162,7 +172,9 @@ class Engine {
           currentExposure: this.paper.exposure(prices),
           symbolExposure: currentNotional,
           price,
+          volatility: this.lastVolatility[ev.symbol],
         });
+
         if (!assessment.approved) {
           actions.push({ symbol: ev.symbol, intent: "BUY", skipped: assessment.reason });
           continue;
@@ -222,7 +234,25 @@ class Engine {
       if (fill) this.notifier.notifyFill(fill);
       return fill;
     }
-    // LIVE path (only reachable when fully armed)
+
+    // Survivability gate: NEVER risk real money off a fabricated/stale
+    // price. If this symbol's current tick came from the SIM fallback (feed
+    // unreachable) rather than a real LIVE quote, refuse the live order and
+    // fall back to the paper ledger so the engine keeps running instead of
+    // silently trading on made-up numbers.
+    const dataSource = this.market.latest[symbol]?.source;
+    if (dataSource !== "LIVE") {
+      log.error(
+        "ENGINE",
+        `REFUSED live ${side} ${symbol}: price source is "${dataSource || "UNKNOWN"}", not LIVE — ` +
+          "will not place a real order against simulated/stale data. Falling back to paper fill."
+      );
+      const fill = this.paper.execute({ symbol, side, notional, price });
+      if (fill) this.notifier.notifyFill({ ...fill, note: `LIVE blocked: price source was ${dataSource || "UNKNOWN"}, not LIVE` });
+      return fill;
+    }
+
+    // LIVE path (only reachable when fully armed AND data is confirmed LIVE)
     try {
       const venue = this.exchanges.primary;
       const venueSymbol = this._venueSymbol(symbol, venue);
@@ -274,6 +304,15 @@ class Engine {
         .catch((e) => log.error("MEMECOIN", e.message));
     runScan();
     this._scanLoop = setInterval(runScan, 30000);
+    // macro risk-appetite overlay on its own slow cadence (public APIs,
+    // minutes-scale data — no reason to hit them every 5s tick)
+    const runMacro = () =>
+      macroFlow
+        .getFlow()
+        .then((flow) => { this.lastMacroFlow = flow; })
+        .catch((e) => log.error("INTELLIGENCE", `macro flow refresh failed: ${e.message}`));
+    runMacro();
+    this._macroLoop = setInterval(runMacro, 5 * 60 * 1000);
     // exchange health on startup
     this.exchanges.healthCheck().catch(() => {});
     // kick an immediate tick
@@ -284,6 +323,7 @@ class Engine {
     this.running = false;
     clearInterval(this._loop);
     clearInterval(this._scanLoop);
+    clearInterval(this._macroLoop);
     log.info("ENGINE", "Stopped");
   }
 
@@ -320,6 +360,7 @@ class Engine {
       })),
       targets: this.lastTargets,
       volatility: this.lastVolatility,
+      macro: this.lastMacroFlow,
       portfolio: this.paper.snapshot(this.prices()),
       risk: this.risk.snapshot(),
       memecoins: this.scanner.snapshot(),

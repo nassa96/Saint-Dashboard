@@ -17,7 +17,12 @@ class Allocator {
 
   /**
    * @param {Array<{symbol, signal, confidence, score}>} evaluations
-   * @param {object} context { seriesBySymbol?: {symbol: number[]} } — required for "sortino" mode
+   * @param {object} context { seriesBySymbol?: {symbol: number[]}, macro?: {deployMultiplier} }
+   *   seriesBySymbol is required for "sortino" mode. `macro` is the optional
+   *   macro risk-appetite overlay (src/intelligence/flow.js) — if present
+   *   and enabled, its deployMultiplier (always <= 1.0) shrinks how much of
+   *   the configured risk budget gets deployed this cycle; it can never
+   *   push deployment above your configured MAX_PORTFOLIO_RISK_PCT.
    * @returns {{targets: Object, ranked: Array}}
    */
   computeTargets(evaluations, context = {}) {
@@ -56,7 +61,13 @@ class Allocator {
     const weighted = longs.map((c) => ({ c, w: weightOf(c) }));
     const totalWeight = weighted.reduce((a, b) => a + b.w, 0);
     let deployed = 0;
-    const maxDeploy = this.cfg.maxPortfolioRiskPct;
+    // Macro overlay can only ever shrink deployment (multiplier <= 1.0),
+    // never exceed the configured risk ceiling.
+    const macroMultiplier =
+      context.macro && this.cfg.macroOverlayEnabled !== false
+        ? Math.min(1, Number(context.macro.deployMultiplier) || 1)
+        : 1;
+    const maxDeploy = this.cfg.maxPortfolioRiskPct * macroMultiplier;
 
     for (const { c, w: rawW } of weighted) {
       let w = totalWeight > 0 ? (rawW / totalWeight) * maxDeploy : 0;

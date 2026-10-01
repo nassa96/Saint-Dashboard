@@ -1,13 +1,47 @@
 /* ============================================================
    RISK MANAGER  (replaces the old random AEGIS)
    Real, deterministic pre-trade risk checks + circuit breakers.
+
+   Two independent breakers, by design:
+     - Daily drawdown halt: a LOSS actually happened -> sticky for the
+       rest of the day (reassess tomorrow with a clear head).
+     - Market-wide volatility stress halt: no loss has necessarily
+       happened yet, it's precautionary -> auto-clears the moment
+       conditions calm back down, same day.
+   Both only ever block NEW entries (BUYs). The engine's rotation-out
+   (SELL) path never calls assess() — de-risking is always allowed.
    ============================================================ */
+
+// Vol-regime -> position-size multiplier. A real, bounded form of
+// "volatility targeting": the choppier a symbol's own regime is right
+// now, the smaller a NEW position in it gets, win or lose. This is what
+// makes the Extreme Volatility Radar (src/volatility/predictor.js)
+// actually change behavior instead of just producing a dashboard badge.
+const REGIME_SIZE_FACTOR = {
+  CALM: 1,
+  NORMAL: 1,
+  ELEVATED: 0.6,
+  EXTREME: 0.3,
+  UNKNOWN: 1,
+};
+
+// Extra confidence required to open NEW risk in a choppier regime.
+const REGIME_CONFIDENCE_BUMP = {
+  CALM: 0,
+  NORMAL: 0,
+  ELEVATED: 0.05,
+  EXTREME: 0.15,
+  UNKNOWN: 0,
+};
 
 class RiskManager {
   constructor(config) {
     this.cfg = config.capital;
     this.halted = false;
     this.haltReason = null;
+    this.stressHalted = false;
+    this.stressReason = null;
+    this.stressInfo = { fraction: 0, extremeCount: 0, total: 0 };
     this.dayStartEquity = config.capital.startingEquity;
     this.dayKey = new Date().toISOString().slice(0, 10);
   }
@@ -35,10 +69,41 @@ class RiskManager {
   }
 
   /**
+   * Feed in this cycle's volatility-radar read for the whole universe.
+   * If too many tracked symbols are simultaneously reading EXTREME, that's
+   * a market-wide stress/contagion signature (e.g. a flash crash hitting
+   * several assets at once) — pause new entries until it passes. Auto-
+   * clears the moment the fraction drops back below the threshold, since
+   * this is precautionary rather than a response to an actual loss.
+   */
+  updateMarketStress(volatilityBySymbol = {}) {
+    const entries = Object.values(volatilityBySymbol || {}).filter((v) => v && v.ready);
+    const extremeCount = entries.filter((v) => v.regime === "EXTREME").length;
+    const fraction = entries.length > 0 ? extremeCount / entries.length : 0;
+    const threshold = this.cfg.maxExtremeFractionForHalt ?? 0.5;
+    // Require at least 3 tracked symbols so a 1-of-1 thin universe doesn't
+    // trip a "market-wide" halt off a single noisy symbol.
+    const stressed = entries.length >= 3 && fraction >= threshold;
+
+    this.stressInfo = { fraction: Number(fraction.toFixed(3)), extremeCount, total: entries.length };
+    if (stressed && !this.stressHalted) {
+      this.stressReason = `MARKET-WIDE STRESS: ${extremeCount}/${entries.length} tracked symbols simultaneously in EXTREME volatility regime (>= ${(threshold * 100).toFixed(0)}% threshold)`;
+    } else if (!stressed) {
+      this.stressReason = null;
+    }
+    this.stressHalted = stressed;
+    return { stressHalted: this.stressHalted, ...this.stressInfo };
+  }
+
+  /**
    * Assess a proposed trade.
+   * @param {object} opts.volatility optional per-symbol radar read
+   *   ({ ready, regime, extremeMoveLikelihood, ... }) from
+   *   src/volatility/predictor.js — scales size down and raises the
+   *   confidence bar in choppier regimes instead of just alerting.
    * @returns {{approved:boolean, reason:string, risk:string, maxNotional:number}}
    */
-  assess({ signal, confidence, equity, currentExposure, symbolExposure, price }) {
+  assess({ signal, confidence, equity, currentExposure, symbolExposure, price, volatility }) {
     if (this.halted) {
       return {
         approved: false,
@@ -48,10 +113,27 @@ class RiskManager {
       };
     }
 
-    if (confidence < this.cfg.minSignalConfidence) {
+    if (this.stressHalted) {
       return {
         approved: false,
-        reason: `Confidence ${confidence.toFixed(2)} < min ${this.cfg.minSignalConfidence}`,
+        reason: `HALTED: ${this.stressReason}`,
+        risk: "CRITICAL",
+        maxNotional: 0,
+      };
+    }
+
+    const regime = volatility && volatility.ready ? volatility.regime : "UNKNOWN";
+    const sizeFactor = REGIME_SIZE_FACTOR[regime] ?? 1;
+    const confidenceBump = REGIME_CONFIDENCE_BUMP[regime] ?? 0;
+    const requiredConfidence = this.cfg.minSignalConfidence + confidenceBump;
+
+    if (confidence < requiredConfidence) {
+      return {
+        approved: false,
+        reason:
+          confidenceBump > 0
+            ? `Confidence ${confidence.toFixed(2)} < min ${requiredConfidence.toFixed(2)} (raised from ${this.cfg.minSignalConfidence} — ${regime} volatility regime)`
+            : `Confidence ${confidence.toFixed(2)} < min ${requiredConfidence.toFixed(2)}`,
         risk: "LOW",
         maxNotional: 0,
       };
@@ -72,8 +154,8 @@ class RiskManager {
       };
     }
 
-    // Per-symbol cap
-    const maxSymbol = equity * this.cfg.maxPositionPct;
+    // Per-symbol cap, scaled down in choppier regimes (volatility targeting).
+    const maxSymbol = equity * this.cfg.maxPositionPct * sizeFactor;
     const roomSymbol = Math.max(0, maxSymbol - symbolExposure);
     const roomPortfolio = Math.max(0, maxPortfolio - currentExposure);
     const maxNotional = Math.min(roomSymbol, roomPortfolio);
@@ -87,14 +169,23 @@ class RiskManager {
       };
     }
 
-    const risk = confidence > 0.75 ? "MEDIUM" : "LOW";
-    return { approved: true, reason: "PASS", risk, maxNotional };
+    const risk = regime === "EXTREME" ? "HIGH" : regime === "ELEVATED" || confidence > 0.75 ? "MEDIUM" : "LOW";
+    return {
+      approved: true,
+      reason: sizeFactor < 1 ? `PASS (sized ${(sizeFactor * 100).toFixed(0)}% for ${regime} volatility)` : "PASS",
+      risk,
+      maxNotional,
+      sizeFactor,
+    };
   }
 
   snapshot() {
     return {
       halted: this.halted,
       haltReason: this.haltReason,
+      stressHalted: this.stressHalted,
+      stressReason: this.stressReason,
+      stress: this.stressInfo,
       dayStartEquity: this.dayStartEquity,
       limits: this.cfg,
     };

@@ -83,6 +83,18 @@ const config = {
     // that's had a smoother, less-painful ride gets sized up relative to
     // one with the same score but nastier downside history).
     allocationMethod: (process.env.ALLOCATION_METHOD || "score").toLowerCase(),
+    // Survivability: if this fraction (or more) of the tracked universe is
+    // simultaneously reading "EXTREME" on the volatility radar, treat it as
+    // a market-wide stress event and pause NEW entries (exits still run)
+    // until conditions calm back down. Independent of the daily-drawdown
+    // breaker, and auto-clears when the stress passes (no loss has
+    // necessarily happened yet — this is precautionary, not punitive).
+    maxExtremeFractionForHalt: num(process.env.MAX_EXTREME_FRACTION_FOR_HALT, 0.5),
+    // Macro risk-appetite overlay (Fear & Greed + global market-cap trend)
+    // nudges deployable capital down a bit in a RISK_OFF macro backdrop and
+    // up a bit in RISK_ON — bounded, never more than a modest tilt. Set to
+    // false to disable and always deploy at the raw allocator target.
+    macroOverlayEnabled: bool(process.env.MACRO_OVERLAY_ENABLED, true),
   },
 
   universe: list(process.env.TRADE_UNIVERSE, [

@@ -16,6 +16,7 @@ const HyperLiquid = require("../src/exchange/hyperliquid");
 const ExchangeManager = require("../src/exchange/manager");
 const { TronWallet } = require("../src/wallet/tron");
 const DnfhEngine = require("../src/yield/dnfh");
+const macroFlow = require("../src/intelligence/flow");
 const Engine = require("../src/engine/engine");
 
 let passed = 0;
@@ -77,6 +78,32 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(b.approved === false, "low-conf trade rejected");
   ok("risk manager gates by confidence + exposure");
 
+  // risk manager — volatility-regime-aware sizing (operationalizes the
+  // Extreme Volatility Radar instead of just alerting on it)
+  const rmVol = new RiskManager(config);
+  const calmAssess = rmVol.assess({ signal: "LONG", confidence: 0.8, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100, volatility: { ready: true, regime: "CALM" } });
+  const extremeAssess = rmVol.assess({ signal: "LONG", confidence: 0.8, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100, volatility: { ready: true, regime: "EXTREME" } });
+  assert(calmAssess.approved === true && extremeAssess.approved === true, "both calm and extreme regimes can still approve a high-conviction trade");
+  assert(extremeAssess.maxNotional < calmAssess.maxNotional, "EXTREME volatility regime shrinks the approved position size vs CALM, same signal/confidence");
+  const extremeLowConf = rmVol.assess({ signal: "LONG", confidence: 0.6, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100, volatility: { ready: true, regime: "EXTREME" } });
+  assert(extremeLowConf.approved === false, "EXTREME regime raises the confidence bar required for a NEW entry");
+  ok("risk manager scales position size + confidence bar down in choppier volatility regimes");
+
+  // risk manager — market-wide stress halt (independent of, and faster to
+  // clear than, the daily-drawdown breaker)
+  const rmStress = new RiskManager(config);
+  const calmUniverse = { A: { ready: true, regime: "CALM" }, B: { ready: true, regime: "NORMAL" }, C: { ready: true, regime: "CALM" } };
+  const stressedUniverse = { A: { ready: true, regime: "EXTREME" }, B: { ready: true, regime: "EXTREME" }, C: { ready: true, regime: "NORMAL" } };
+  rmStress.updateMarketStress(calmUniverse);
+  assert(rmStress.stressHalted === false, "no stress halt when most of the universe is calm");
+  rmStress.updateMarketStress(stressedUniverse);
+  assert(rmStress.stressHalted === true, "stress halt trips when >= threshold fraction of the universe is simultaneously EXTREME");
+  const duringStress = rmStress.assess({ signal: "LONG", confidence: 0.99, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(duringStress.approved === false && /MARKET-WIDE STRESS/.test(duringStress.reason), "new entries are refused during a market-wide stress halt, even at max confidence");
+  rmStress.updateMarketStress(calmUniverse);
+  assert(rmStress.stressHalted === false, "stress halt auto-clears the same day once conditions calm back down (unlike the drawdown breaker)");
+  ok("risk manager pauses new entries on market-wide volatility stress and auto-clears when it passes");
+
   // allocator
   const alloc = new Allocator(config);
   const { targets } = alloc.computeTargets([
@@ -87,6 +114,29 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(targets["BTC-USD"] > 0, "btc allocated");
   assert(targets["SOL-USD"] === undefined, "short not allocated in spot model");
   ok("allocator rotates capital into strongest longs");
+
+  // allocator — macro overlay can only ever shrink deployment, never boost it
+  const macroEvals = [
+    { symbol: "BTC-USD", signal: "LONG", confidence: 0.8, score: 0.6 },
+    { symbol: "ETH-USD", signal: "LONG", confidence: 0.7, score: 0.4 },
+  ];
+  const neutralTargets = alloc.computeTargets(macroEvals, {}).targets;
+  const riskOffTargets = alloc.computeTargets(macroEvals, { macro: { deployMultiplier: 0.65 } }).targets;
+  const riskOnTargets = alloc.computeTargets(macroEvals, { macro: { deployMultiplier: 1.4 } }).targets; // intentionally > 1
+  const sumWeights = (t) => Object.values(t).reduce((a, b) => a + b, 0);
+  assert(sumWeights(riskOffTargets) < sumWeights(neutralTargets), "RISK_OFF macro overlay deploys less total capital than no overlay");
+  assert(sumWeights(riskOnTargets) <= sumWeights(neutralTargets) + 1e-9, "a >1.0 macro multiplier is clamped — it can never deploy MORE than the configured risk ceiling allows");
+  ok("allocator macro overlay only ever throttles deployment, never exceeds the configured risk ceiling");
+
+  // macro flow classification — pure logic, no network
+  assert(macroFlow.classify(80, 2) === "RISK_ON", "high fear&greed + positive market-cap trend classifies RISK_ON");
+  assert(macroFlow.classify(15, 1) === "RISK_OFF", "very low fear&greed (extreme fear) classifies RISK_OFF regardless of market-cap trend");
+  assert(macroFlow.classify(90, -8) === "RISK_OFF", "a sharp market-cap drawdown classifies RISK_OFF even with high fear&greed");
+  assert(macroFlow.classify(50, 0) === "NEUTRAL", "middling readings classify NEUTRAL");
+  assert(macroFlow.classify(null, null) === "UNKNOWN", "no data classifies UNKNOWN rather than guessing");
+  assert(macroFlow.MULTIPLIER.RISK_OFF < macroFlow.MULTIPLIER.NEUTRAL && macroFlow.MULTIPLIER.NEUTRAL <= macroFlow.MULTIPLIER.RISK_ON, "multipliers only ever shrink deployment as the backdrop gets more cautious");
+  assert(Object.values(macroFlow.MULTIPLIER).every((m) => m <= 1), "no macro regime is ever allowed to multiply deployment above 1.0 (configured risk ceiling)");
+  ok("macro flow overlay classifies honestly and never multiplies deployment above the configured ceiling");
 
   // Sortino-ratio allocation mode — a smoother (less downside-painful)
   // series should get more weight than a jagged one at equal conviction score.
@@ -228,6 +278,39 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(Array.isArray(state.signals) && state.signals.length === config.universe.length, "signals per symbol");
   assert(state.volatility && typeof state.volatility === "object", "volatility radar present in engine snapshot");
   ok("engine full pipeline tick completes end-to-end");
+
+  // Survivability gate: even when LIVE trading is fully armed, the engine
+  // must refuse to place a real order against a symbol whose current price
+  // came from the SIM fallback (feed unreachable) rather than a real quote.
+  const simGateEngine = {
+    config: { canTradeLive: () => true },
+    market: { latest: { "BTC-USD": { source: "SIM", price: 100 } } },
+    paper: { execute: (args) => ({ ...args, status: "FILLED", viaPaperFallback: true }) },
+    notifier: { notifyFill: () => {} },
+    exchanges: {
+      primary: "coinbase",
+      routeLiveOrder: async () => { throw new Error("a live order must never be attempted when the price source isn't confirmed LIVE"); },
+    },
+    _venueSymbol: Engine.prototype._venueSymbol,
+  };
+  const simGateFill = await Engine.prototype._execute.call(simGateEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
+  assert(simGateFill && simGateFill.viaPaperFallback === true, "live execution is refused and falls back to paper when price data isn't confirmed LIVE");
+
+  const liveGateEngine = {
+    config: { canTradeLive: () => true },
+    market: { latest: { "BTC-USD": { source: "LIVE", price: 100 } } },
+    paper: { execute: (args) => ({ ...args, status: "FILLED" }) },
+    notifier: { notifyFill: () => {} },
+    exchanges: {
+      primary: "coinbase",
+      routeLiveOrder: async (order) => { liveGateEngine._called = true; return { status: "FILLED", raw: { order } }; },
+    },
+    _venueSymbol: Engine.prototype._venueSymbol,
+  };
+  const liveGateFill = await Engine.prototype._execute.call(liveGateEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
+  assert(liveGateEngine._called === true, "a confirmed-LIVE price source is allowed to reach the exchange routing path");
+  assert(liveGateFill && liveGateFill.mode === "LIVE", "a successful live order is reported with mode=LIVE");
+  ok("engine refuses to risk real money on non-LIVE (SIM/stale) price data, even when fully armed");
 
   // backtester over synthetic history
   const { syntheticCloses } = require("../src/backtest/history");

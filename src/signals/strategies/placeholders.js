@@ -14,14 +14,14 @@
    logic into the matching function below and flip `status` to "active".
    ============================================================ */
 
-function inertStrategy(name, label, docFile) {
+function inertStrategy(name, label, docFile, reason) {
   const defaultParams = {};
   function evaluate() {
     return {
       signal: "FLAT",
       confidence: 0,
       score: 0,
-      reasons: [`"${label}" has no trading logic yet — fill out docs/strategies/${docFile} and ask to implement it`],
+      reasons: [reason || `"${label}" has no trading logic yet — fill out docs/strategies/${docFile} and ask to implement it`],
       indicators: {},
     };
   }
@@ -29,7 +29,17 @@ function inertStrategy(name, label, docFile) {
 }
 
 const STRATEGIES = {
-  dnfh: inertStrategy("dnfh", "DNFH (spec pending)", "DNFH.md"),
+  // DNFH itself is implemented for real — just not here. It's a two-leg,
+  // cross-venue position (Base spot + HyperLiquid perp short), not a
+  // single-symbol directional signal, so it doesn't fit this registry's
+  // evaluate(series) interface. See src/yield/dnfh.js, GET/POST /api/dnfh/*,
+  // and docs/strategies/DNFH.md for the real, working, fully-gated version.
+  dnfh: inertStrategy(
+    "dnfh",
+    "DNFH (implemented separately — see docs/strategies/DNFH.md)",
+    "DNFH.md",
+    "DNFH is implemented as a real cross-venue strategy, not a per-symbol signal — see src/yield/dnfh.js and /api/dnfh/scan|plan|execute"
+  ),
   overlord: inertStrategy("overlord", "Overlord Strategy (spec pending)", "OVERLORD.md"),
   autonomouswealth: inertStrategy(
     "autonomouswealth",

@@ -122,6 +122,28 @@ it to anything beyond `localhost`:
 
 Auth protects both the REST API and the live WebSocket stream.
 
+## Automatic survivability breakers (beyond the daily-drawdown halt)
+
+Three additional, always-on protections that don't require you to do anything:
+
+1. **Volatility-regime sizing.** The Extreme Volatility Radar's read for each
+   symbol now directly shrinks position size (down to ~30% in an EXTREME
+   regime) and raises the confidence bar required to open a NEW position
+   there — instead of only showing a badge. Exits are never affected.
+2. **Market-wide stress halt.** If `MAX_EXTREME_FRACTION_FOR_HALT` (default
+   50%) or more of the tracked universe is simultaneously reading EXTREME at
+   once, new entries pause across the board until it passes. Unlike the
+   daily-drawdown breaker this is precautionary (no loss has necessarily
+   happened) and auto-clears the same day once conditions calm down.
+3. **Non-LIVE price gate.** Even with the three-lock live gate fully armed,
+   the engine checks the price source for the specific symbol it's about to
+   trade. If that symbol's feed is unreachable and running on the SIM
+   fallback, the real order is refused and it falls back to the paper ledger
+   — it will never place a live order against a fabricated/stale price.
+
+None of these three can be bypassed by config; they're load-bearing safety
+logic, not optional alerts.
+
 ## Kill switch
 
 To stop everything instantly: set `LIVE_TRADING_ENABLED=false` and restart, or

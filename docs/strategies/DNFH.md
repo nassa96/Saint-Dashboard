@@ -1,25 +1,29 @@
 # Strategy spec: DNFH
 
-Status: **awaiting spec** — registered as an inert placeholder in
-`src/signals/strategies/placeholders.js`. It will always return `FLAT`
-until this file is filled in and implemented.
+Status: **implemented** — but not as a per-symbol signal strategy (this
+registry slot stays an inert `FLAT` placeholder, see below for why).
 
-I don't know what "DNFH" stands for or what rules it follows. Please answer
-as much of the below as you can (plain language is fine, I'll formalize it):
+You defined DNFH as **Delta-Neutral Funding Harvest**: long spot / short an
+equal-notional perp, collecting the funding rate perp longs pay shorts when
+funding is positive, with net price exposure ~0.
 
-1. **What does DNFH stand for?**
-2. **What triggers an entry?** (e.g. a specific indicator crossing a
-   threshold, an order-book/volume pattern, a news event, a divergence
-   between two assets...)
-3. **What triggers an exit?** (take-profit %, stop-loss %, time-based,
-   indicator flip...)
-4. **What timeframe?** (seconds/minutes/hours/days per bar)
-5. **What markets/symbols is it meant for?** (majors, alts, memecoins...)
-6. **Position sizing rule**, if you have one (fixed %, Kelly-style,
-   volatility-scaled...)
-7. **Any existing reference** (a paper, a Twitter thread, a backtest you've
-   already run, pseudocode) — even rough notes help a lot.
+That's a real, legitimate, well-known trading technique, and it's built —
+just not here. It doesn't fit this file's slot (`src/signals/strategies/`)
+because that interface is for single-symbol directional signals (`evaluate(series)
+-> {signal: LONG/SHORT/FLAT}`) feeding the spot rotation engine. DNFH is a
+**two-leg, cross-venue position** (Base spot + HyperLiquid perp), which needs
+its own orchestration. It lives in:
 
-Once I have this, I'll implement it as a real, testable strategy module
-(same pattern as `momentum.js` / `meanReversion.js`) with unit tests and a
-backtest, and flip its `status` to `"active"`.
+- **`src/yield/dnfh.js`** — the real implementation
+- **`GET /api/dnfh/scan`** — read-only, ranks live HyperLiquid funding rates
+  by annualized yield
+- **`POST /api/dnfh/plan`** — pure math; requires you to supply a
+  self-verified spot token contract address (never guessed)
+- **`POST /api/dnfh/execute`** — moves real funds on both legs; requires the
+  full live-arm gate + on-chain-swap arm; leverage hard-capped at
+  `HYPERLIQUID_MAX_LEVERAGE` (default 2x); reports a loud warning instead of
+  silently leaving you one-sided if one leg fails
+- **`VENUES.md`** and **`SAFETY.md`** — usage + risk documentation
+
+See those files for the real, working version. This per-symbol slot remains
+`FLAT`/inert — there's no single-symbol directional signal to implement here.

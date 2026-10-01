@@ -19,6 +19,7 @@ class MarketData {
     this.history = {}; // symbol -> [{ts, price}]
     this.latest = {}; // symbol -> { price, source, ts, change24h }
     this.bars = {}; // symbol -> [{ts, open, high, low, close, volume, source}] — real OHLCV candles
+    this.orderBookSnapshots = {}; // symbol -> [{ts, bids:[[px,size]], asks:[[px,size]]}] last 2 kept, for OFI deltas
     this.source = "UNKNOWN"; // LIVE | SIM
     this.lastError = null;
     // seed synthetic anchors for fallback so numbers look plausible
@@ -54,6 +55,45 @@ class MarketData {
    *  more than a close price: ATR, stochastic, swing-high/low/Fibonacci. */
   getBars(symbol, limit = 200) {
     return (this.bars[symbol] || []).slice(-limit);
+  }
+
+  /** Last 2 L2 order-book snapshots for a symbol (oldest -> newest), used
+   *  by the Order Flow Imbalance calculator. See refreshOrderBooks(). */
+  getOrderBookSnapshots(symbol) {
+    return this.orderBookSnapshots[symbol] || [];
+  }
+
+  /**
+   * Poll Coinbase's public L2 (aggregated) order book on a slow cadence —
+   * NOT a continuous WebSocket depth feed (that's real infrastructure this
+   * app doesn't run; see src/signals/orderFlow.js header for why this
+   * snapshot-based approach is an honest, clearly-labeled substitute for
+   * the "continuous multi-level OFI tensor" a true L2 WS feed would give
+   * you). Keeps only the last 2 snapshots per symbol — enough to compute
+   * one Order-Flow-Imbalance delta per poll.
+   */
+  async refreshOrderBooks(levels = 10) {
+    for (const symbol of this.universe) {
+      try {
+        const data = await httpJson(
+          `https://api.exchange.coinbase.com/products/${symbol}/book?level=2`,
+          { timeout: 7000, headers: { "User-Agent": "saint-dashboard/2.0" } }
+        );
+        const bids = (data?.bids || []).slice(0, levels).map((b) => [Number(b[0]), Number(b[1])]);
+        const asks = (data?.asks || []).slice(0, levels).map((a) => [Number(a[0]), Number(a[1])]);
+        if (!bids.length || !asks.length) throw new Error("empty book");
+        const snap = { ts: Date.now(), bids, asks, source: "LIVE" };
+        const arr = this.orderBookSnapshots[symbol] || [];
+        arr.push(snap);
+        this.orderBookSnapshots[symbol] = arr.slice(-2);
+      } catch (e) {
+        // No synthetic order-book fallback — OFI on fabricated depth would
+        // be actively misleading (unlike the price/bar fallbacks elsewhere,
+        // which are clearly labeled SIM). Just skip this symbol this round.
+        continue;
+      }
+    }
+    return this.orderBookSnapshots;
   }
 
   /**

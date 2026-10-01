@@ -382,6 +382,52 @@ app.get("/api/avss/scan", async (req, res) => {
   }
 });
 
+// Order Flow Imbalance (OFI) — polls a fresh Coinbase L2 book snapshot for
+// the symbol, keeps it alongside the previous poll, and computes the
+// multi-level imbalance between the two. See MarketData.refreshOrderBooks
+// + src/signals/orderFlow.js for the honest "slow REST poll, not a
+// continuous WS tensor" scope note.
+app.get("/api/market/orderflow", async (req, res) => {
+  try {
+    const symbol = req.query?.symbol;
+    if (!symbol || !engine.config.universe.includes(symbol)) {
+      throw new Error(`symbol is required and must be one of the configured universe: ${engine.config.universe.join(", ")}`);
+    }
+    const levels = Math.min(Number(req.query?.levels) || 10, 25);
+    await engine.market.refreshOrderBooks(levels);
+    const { ofiFromMarket } = require("./src/signals/orderFlow");
+    const ofi = ofiFromMarket(engine.market, symbol, levels);
+    res.json({
+      symbol,
+      snapshots: engine.market.getOrderBookSnapshots(symbol).length,
+      ofi,
+      note: ofi ? undefined : "need at least 2 polls to compute an OFI delta — call again shortly",
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Kalman-filter pairs cointegration — time-varying hedge ratio + spread
+// z-score between two symbols already tracked in this app's price history
+// (no new data feed required). See src/signals/kalmanPairs.js.
+app.get("/api/signals/kalman-pairs", async (req, res) => {
+  try {
+    const { x, y } = req.query || {};
+    if (!x || !y) throw new Error("query params x and y (symbols) are required, e.g. ?x=BTC-USD&y=ETH-USD");
+    const xSeries = (engine.market.history[x] || []).map((h) => h.price);
+    const ySeries = (engine.market.history[y] || []).map((h) => h.price);
+    if (!xSeries.length || !ySeries.length) throw new Error(`no tracked price history yet for ${x} and/or ${y} — run a few engine ticks first`);
+    const { kalmanPairSignal } = require("./src/signals/kalmanPairs");
+    const opts = {};
+    if (req.query?.zWindow) opts.zWindow = Number(req.query.zWindow);
+    if (req.query?.zEntryThreshold) opts.zEntryThreshold = Number(req.query.zEntryThreshold);
+    res.json({ x, y, ...kalmanPairSignal(xSeries, ySeries, opts) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.get("/api/dnfh/rebalance-check", async (req, res) => {
   try {
     const { symbol, spotPx, perpPx } = req.query || {};

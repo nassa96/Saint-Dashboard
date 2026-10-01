@@ -41,6 +41,7 @@
    ============================================================ */
 
 const { ewmaVol } = require("../volatility/predictor");
+const { computeNetOpportunity } = require("../portfolio/netOpportunity");
 const log = require("../util/logger");
 
 const defaultParams = {
@@ -50,6 +51,14 @@ const defaultParams = {
   targetTrailingStopBps: 12,
   minHoldSec: 30,
   maxHoldSec: 120,
+  // Net-opportunity cost model (generalized multi-chain formula from
+  // Market Overlord v2) — both venues here are CEX/perp (no gas/bridge),
+  // so only fee/slippage/MEV-discount terms apply by default.
+  assumedNotionalUsd: 1000,
+  takerFeeBps: 2,
+  targetSlippageBps: 5,
+  mevRiskDiscountBps: 3,
+  minEdgeBps: 5,
 };
 
 function hlBaseSymbol(spotSymbol) {
@@ -119,6 +128,18 @@ class AvssScanner {
       const lagTriggered = Math.abs(lagBps) >= p.lagBpsThreshold;
       const flowTriggered = flowZ != null && Math.abs(flowZ) >= p.cvdZThreshold;
 
+      // Generalized net-opportunity gate: the raw bps lag is "gross
+      // dislocation" — still has to clear real execution costs before it's
+      // a trade, not just a number on a dashboard.
+      const netOpportunity = computeNetOpportunity({
+        notionalUsd: p.assumedNotionalUsd,
+        grossDislocationBps: Math.abs(lagBps),
+        takerFeeBps: p.takerFeeBps,
+        targetSlippageBps: p.targetSlippageBps,
+        mevRiskDiscountBps: p.mevRiskDiscountBps,
+        minEdgeBps: p.minEdgeBps,
+      });
+
       results.push({
         symbol,
         spotPrice,
@@ -128,7 +149,8 @@ class AvssScanner {
         flowZProxy: flowZ != null ? Number(flowZ.toFixed(2)) : null,
         lagTriggered,
         flowTriggered,
-        triggered: lagTriggered && flowTriggered,
+        netOpportunity,
+        triggered: lagTriggered && flowTriggered && netOpportunity.approved,
         direction: lagBps > 0 ? "perp trading rich vs spot" : "perp trading cheap vs spot",
         note:
           "flowZProxy is a price-based 60s-return z-score, NOT real trade-tagged CVD; spot leg is Coinbase CEX, NOT the Base DEX the spec named — see avss.js header for why.",

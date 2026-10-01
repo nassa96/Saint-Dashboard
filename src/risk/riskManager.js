@@ -2,13 +2,24 @@
    RISK MANAGER  (replaces the old random AEGIS)
    Real, deterministic pre-trade risk checks + circuit breakers.
 
-   Two independent breakers, by design:
-     - Daily drawdown halt: a LOSS actually happened -> sticky for the
-       rest of the day (reassess tomorrow with a clear head).
+   Three independent breakers, by design (the Aegis Guardian two-tier
+   drawdown model):
+     - SOFT BRAKE (default 5% daily drawdown): not a halt — continuously
+       re-evaluated every tick. While active, new-entry size is halved
+       and leverage is capped to 1x (see maxLeverageCap()). Auto-clears
+       the instant drawdown recovers back under the soft threshold; this
+       is a brake, not a breaker, so it responds live rather than being
+       sticky for the day.
+     - HARD KILLSWITCH (default 10% daily drawdown): a real breaker —
+       sticky for a rolling cooldown (default 24h, see haltCooldownHours)
+       regardless of same-day recovery. The engine is expected to flatten
+       all open positions to cash the moment this fires (see engine.js
+       justTriggeredHardHalt / _flattenAll()) — RiskManager only decides
+       WHEN, not HOW, since it doesn't own the broker/exchange handles.
      - Market-wide volatility stress halt: no loss has necessarily
        happened yet, it's precautionary -> auto-clears the moment
        conditions calm back down, same day.
-   Both only ever block NEW entries (BUYs). The engine's rotation-out
+   All three only ever block NEW entries (BUYs). The engine's rotation-out
    (SELL) path never calls assess() — de-risking is always allowed.
    ============================================================ */
 
@@ -45,6 +56,9 @@ class RiskManager {
     this.dayStartEquity = config.capital.startingEquity;
     this.dayKey = new Date().toISOString().slice(0, 10);
     this.haltUntil = null; // rolling cooldown timestamp (ms) — set when a drawdown halt triggers
+    this.softBraked = false; // Aegis soft brake — continuously re-evaluated, not sticky
+    this.softBrakeReason = null;
+    this.justTriggeredHardHalt = false; // one-shot flag the engine consumes to trigger a flatten-all
   }
 
   _rollDay(equity) {
@@ -73,16 +87,41 @@ class RiskManager {
   updateEquity(equity) {
     this._rollDay(equity);
     this._checkHaltCooldown();
+    this.justTriggeredHardHalt = false; // reset the one-shot flag every tick before re-checking
     const dd = (this.dayStartEquity - equity) / this.dayStartEquity;
-    if (dd >= this.cfg.maxDailyDrawdownPct && !this.halted) {
+
+    const hardThreshold = this.cfg.maxDailyDrawdownPct;
+    const softThreshold = Number(this.cfg.softBrakeDrawdownPct ?? Math.min(0.05, hardThreshold / 2));
+
+    if (dd >= hardThreshold && !this.halted) {
       this.halted = true;
+      this.justTriggeredHardHalt = true;
       const cooldownHours = Number(this.cfg.haltCooldownHours) || 24;
       this.haltUntil = Date.now() + cooldownHours * 60 * 60 * 1000;
-      this.haltReason = `Daily drawdown ${(dd * 100).toFixed(1)}% >= limit ${(
-        this.cfg.maxDailyDrawdownPct * 100
-      ).toFixed(1)}% — halted for a rolling ${cooldownHours}h cooldown (clears ${new Date(this.haltUntil).toISOString()})`;
+      this.haltReason = `AEGIS HARD KILLSWITCH: daily drawdown ${(dd * 100).toFixed(1)}% >= limit ${(
+        hardThreshold * 100
+      ).toFixed(1)}% — flattening all positions, halted for a rolling ${cooldownHours}h cooldown (clears ${new Date(this.haltUntil).toISOString()})`;
     }
-    return { dd, halted: this.halted };
+
+    // Soft brake: a live, continuously re-evaluated condition (NOT sticky)
+    // — it tracks current drawdown every tick, engaging and clearing as
+    // drawdown crosses the threshold in either direction. Only meaningful
+    // below the hard threshold (once hard-halted, nothing can buy anyway).
+    const softNow = dd >= softThreshold && dd < hardThreshold;
+    if (softNow && !this.softBraked) {
+      this.softBrakeReason = `AEGIS SOFT BRAKE: daily drawdown ${(dd * 100).toFixed(1)}% >= ${(softThreshold * 100).toFixed(1)}% — new entries halved, leverage capped to 1x`;
+    } else if (!softNow) {
+      this.softBrakeReason = null;
+    }
+    this.softBraked = softNow;
+
+    return { dd, halted: this.halted, softBraked: this.softBraked };
+  }
+
+  /** Aegis leverage ceiling: 1x while soft-braked or hard-halted, otherwise
+   *  unconstrained (the caller — e.g. DNFH — still applies its own configured cap). */
+  maxLeverageCap() {
+    return this.softBraked || this.halted ? 1 : Infinity;
   }
 
   /**
@@ -140,7 +179,10 @@ class RiskManager {
     }
 
     const regime = volatility && volatility.ready ? volatility.regime : "UNKNOWN";
-    const sizeFactor = REGIME_SIZE_FACTOR[regime] ?? 1;
+    // Aegis soft brake halves new-entry size on top of whatever the
+    // volatility regime already prescribes (the two stack multiplicatively
+    // — a soft-braked account in an EXTREME regime gets 0.3 * 0.5 = 0.15x).
+    const sizeFactor = (REGIME_SIZE_FACTOR[regime] ?? 1) * (this.softBraked ? 0.5 : 1);
     const confidenceBump = REGIME_CONFIDENCE_BUMP[regime] ?? 0;
     const requiredConfidence = this.cfg.minSignalConfidence + confidenceBump;
 
@@ -192,13 +234,16 @@ class RiskManager {
       };
     }
 
-    const risk = regime === "EXTREME" ? "HIGH" : regime === "ELEVATED" || confidence > 0.75 ? "MEDIUM" : "LOW";
+    const risk = this.softBraked ? "HIGH" : regime === "EXTREME" ? "HIGH" : regime === "ELEVATED" || confidence > 0.75 ? "MEDIUM" : "LOW";
+    const reasonBits = [];
+    if (sizeFactor < 1) reasonBits.push(`sized ${(sizeFactor * 100).toFixed(0)}% for ${regime} volatility${this.softBraked ? " + Aegis soft brake" : ""}`);
     return {
       approved: true,
-      reason: sizeFactor < 1 ? `PASS (sized ${(sizeFactor * 100).toFixed(0)}% for ${regime} volatility)` : "PASS",
+      reason: reasonBits.length ? `PASS (${reasonBits.join(", ")})` : "PASS",
       risk,
       maxNotional,
       sizeFactor,
+      softBraked: this.softBraked,
     };
   }
 
@@ -207,6 +252,9 @@ class RiskManager {
       halted: this.halted,
       haltReason: this.haltReason,
       haltUntil: this.haltUntil ? new Date(this.haltUntil).toISOString() : null,
+      softBraked: this.softBraked,
+      softBrakeReason: this.softBrakeReason,
+      maxLeverageCap: this.maxLeverageCap(),
       stressHalted: this.stressHalted,
       stressReason: this.stressReason,
       stress: this.stressInfo,

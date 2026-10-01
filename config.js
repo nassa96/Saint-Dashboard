@@ -73,6 +73,12 @@ const config = {
     maxPositionPct: num(process.env.MAX_POSITION_PCT, 0.2),
     maxPortfolioRiskPct: num(process.env.MAX_PORTFOLIO_RISK_PCT, 0.6),
     maxDailyDrawdownPct: num(process.env.MAX_DAILY_DRAWDOWN_PCT, 0.1),
+    // Aegis Guardian two-tier drawdown: a SOFT brake well before the hard
+    // killswitch above. Not sticky — re-evaluated every tick, halves new-
+    // entry size and caps leverage to 1x while active, auto-clears the
+    // instant drawdown recovers back under this threshold. Default 5%,
+    // i.e. half of the default 10% hard threshold.
+    softBrakeDrawdownPct: num(process.env.SOFT_BRAKE_DRAWDOWN_PCT, 0.05),
     perTradeRiskPct: num(process.env.PER_TRADE_RISK_PCT, 0.02),
     minSignalConfidence: num(process.env.MIN_SIGNAL_CONFIDENCE, 0.55),
     // Fee-aware floor: never place a trade smaller than this many USD.

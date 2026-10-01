@@ -120,6 +120,40 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(rm3.halted === false, "halt clears once its own rolling cooldown has actually elapsed");
   ok("risk manager uses a true rolling cooldown for the daily-drawdown halt instead of clearing at the next calendar day");
 
+  // Aegis Guardian two-tier drawdown: soft brake (not sticky, live) vs
+  // hard killswitch (sticky, one-shot flattening trigger)
+  const rmAegis = new RiskManager({ capital: { ...config.capital, softBrakeDrawdownPct: 0.05, maxDailyDrawdownPct: 0.1, haltCooldownHours: 24 } });
+  rmAegis.updateEquity(10000);
+  const baseline = rmAegis.assess({ signal: "LONG", confidence: 0.9, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(baseline.softBraked === false && baseline.sizeFactor === 1, "no drawdown yet -> soft brake inactive, full size factor");
+  assert(rmAegis.maxLeverageCap() === Infinity, "no drawdown yet -> leverage uncapped by Aegis");
+
+  rmAegis.updateEquity(9400); // 6% drawdown -> crosses the 5% soft threshold, still under the 10% hard one
+  assert(rmAegis.softBraked === true && rmAegis.halted === false, "6% drawdown trips the soft brake but not the hard killswitch");
+  assert(rmAegis.maxLeverageCap() === 1, "soft brake caps leverage to 1x");
+  const softAssess = rmAegis.assess({ signal: "LONG", confidence: 0.9, equity: 9400, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(softAssess.approved === true && softAssess.sizeFactor === 0.5, "soft brake halves new-entry size factor but still allows the trade");
+
+  rmAegis.updateEquity(9900); // recovers back under 5% drawdown
+  assert(rmAegis.softBraked === false, "soft brake auto-clears the instant drawdown recovers — not sticky for the day");
+
+  assert(rmAegis.justTriggeredHardHalt === false, "one-shot hard-halt flag stays false until the hard threshold is actually crossed");
+  rmAegis.updateEquity(8900); // 11% drawdown -> crosses the 10% hard threshold
+  assert(rmAegis.halted === true && rmAegis.justTriggeredHardHalt === true, "11% drawdown trips the hard killswitch and raises the one-shot flatten-all flag");
+  rmAegis.updateEquity(8900); // next tick, still halted — flag must have been consumed/reset
+  assert(rmAegis.justTriggeredHardHalt === false, "one-shot hard-halt flag resets on the next tick so the engine only flattens once");
+  const hardAssess = rmAegis.assess({ signal: "LONG", confidence: 0.9, equity: 8900, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(hardAssess.approved === false, "hard-halted account refuses all new entries");
+  ok("Aegis Guardian two-tier drawdown: soft brake halves size + caps leverage (live, auto-clearing); hard killswitch halts + raises a one-shot flatten-all flag");
+
+  // DNFH respects the Aegis leverage ceiling when a shared risk instance is wired in
+  const rmForDnfh = new RiskManager({ capital: { ...config.capital, softBrakeDrawdownPct: 0.05, maxDailyDrawdownPct: 0.1 } });
+  rmForDnfh.updateEquity(10000);
+  rmForDnfh.updateEquity(9400); // soft-braked -> leverage capped to 1x
+  const dnfhWithRisk = new DnfhEngine({ exchanges: new ExchangeManager(config), wallet: null, config, risk: rmForDnfh });
+  assert(dnfhWithRisk.risk.maxLeverageCap() === 1, "DNFH sees the shared RiskManager's soft-braked leverage cap");
+  ok("DNFH planPosition's leverage cap respects an injected Aegis RiskManager instance");
+
   // risk manager — volatility-regime-aware sizing (operationalizes the
   // Extreme Volatility Radar instead of just alerting on it)
   const rmVol = new RiskManager(config);
@@ -455,7 +489,78 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
     return new AvssScanner({ exchanges: { venues: { hyperliquid: calmHl } }, market: calmMarket, config: { universe: ["BTC-USD"] } }).scan();
   })();
   assert(avssNoTrigger.candidates[0].triggered === false, "AVSS stays quiet when there's no lag and no flow spike");
+  assert(avssCandidate.netOpportunity && avssCandidate.netOpportunity.approved === true, "AVSS's generalized net-opportunity gate approves a 30bps lag against modest default costs");
+  const avssExpensive = new AvssScanner({
+    exchanges: { venues: { hyperliquid: avssHl } },
+    market: avssMarket,
+    config: { universe: ["BTC-USD"], avss: { minEdgeBps: 5, takerFeeBps: 15, targetSlippageBps: 10, mevRiskDiscountBps: 10 } }, // 35bps of costs > 30bps gross lag
+  });
+  const avssExpensiveResult = await avssExpensive.scan();
+  const avssExpensiveCandidate = avssExpensiveResult.candidates[0];
+  assert(avssExpensiveCandidate.lagTriggered === true && avssExpensiveCandidate.flowTriggered === true, "lag+flow conditions still confirm on their own");
+  assert(avssExpensiveCandidate.netOpportunity.approved === false, "net-opportunity gate rejects when modeled costs exceed the gross dislocation");
+  assert(avssExpensiveCandidate.triggered === false, "AVSS requires the net-opportunity gate to clear, even when lag+flow both confirm");
   ok("AVSS scan-only detector confirms cross-venue lag + price-flow-spike confluence before flagging a candidate");
+  ok("AVSS's generalized net-opportunity gate (gross dislocation minus fees/slippage/MEV-discount) blocks triggers that wouldn't survive real execution costs");
+
+  // Generalized multi-chain net-opportunity formula — pure math, standalone
+  const { computeNetOpportunity } = require("../src/portfolio/netOpportunity");
+  const netOpp = computeNetOpportunity({
+    notionalUsd: 10000,
+    grossDislocationBps: 50,
+    gasCostUsd: 3,
+    takerFeeBps: 5,
+    targetSlippageBps: 8,
+    bridgeCostUsd: 2,
+    settlementLatencyPenaltyBps: 2,
+    mevRiskDiscountBps: 5,
+    minEdgeBps: 10,
+  });
+  assert(Math.abs(netOpp.grossUsd - 50) < 1e-6, "net-opportunity gross = notional * grossDislocationBps/10000");
+  const expectedCosts = 3 + (5 / 10000) * 10000 + (8 / 10000) * 10000 + 2 + (2 / 10000) * 10000 + (5 / 10000) * 10000;
+  assert(Math.abs(netOpp.totalCostUsd - expectedCosts) < 1e-6, "net-opportunity sums every cost component (gas + taker fee + slippage + bridge + settlement penalty + MEV discount)");
+  assert(Math.abs(netOpp.netUsd - (netOpp.grossUsd - netOpp.totalCostUsd)) < 1e-6, "net = gross - total costs");
+  assert(netOpp.approved === (netOpp.netBps >= 10), "approved reflects whether net bps clears the configured minimum edge");
+  assert(computeNetOpportunity({ notionalUsd: 1000, grossDislocationBps: 1, takerFeeBps: 50, minEdgeBps: 0 }).approved === false, "a tiny gross dislocation against a large fee is correctly rejected");
+  ok("generalized multi-chain net-opportunity formula computes gross/cost-breakdown/net/approved correctly, standalone");
+
+  // Order Flow Imbalance (OFI) — multi-level, snapshot-based proxy for a
+  // continuous L2 WebSocket tensor (see src/signals/orderFlow.js header)
+  const { computeOFI } = require("../src/signals/orderFlow");
+  const obPrev = { ts: 1000, bids: [[100, 5], [99.9, 4], [99.8, 3]], asks: [[100.1, 5], [100.2, 4], [100.3, 3]] };
+  const obNextBuyPressure = { ts: 2000, bids: [[100, 8], [99.9, 4], [99.8, 3]], asks: [[100.1, 2], [100.2, 4], [100.3, 3]] };
+  const ofiBuy = computeOFI(obPrev, obNextBuyPressure, 3);
+  assert(ofiBuy.ofi > 0 && ofiBuy.bias === "BUY_PRESSURE", "growing bid depth + shrinking ask depth at the same prices reads as buy-pressure OFI");
+  const obNextSellPressure = { ts: 2000, bids: [[100, 2], [99.9, 4], [99.8, 3]], asks: [[100.1, 9], [100.2, 4], [100.3, 3]] };
+  const ofiSell = computeOFI(obPrev, obNextSellPressure, 3);
+  assert(ofiSell.ofi < 0 && ofiSell.bias === "SELL_PRESSURE", "shrinking bid depth + growing ask depth at the same prices reads as sell-pressure OFI");
+  assert(computeOFI(null, obNextBuyPressure) === null, "OFI returns null (not a crash) without two snapshots to diff");
+  ok("Order Flow Imbalance (OFI) computes a multi-level, sign-correct, normalized imbalance from two order-book snapshots");
+
+  // Kalman-filter pairs cointegration — time-varying hedge ratio + spread z-score
+  const { kalmanPairSignal, KalmanBeta } = require("../src/signals/kalmanPairs");
+  const kfSeedBeta = 2;
+  const kalmanX = [];
+  const kalmanY = [];
+  let kx = 100;
+  for (let i = 0; i < 60; i++) {
+    kx = kx + (Math.sin(i / 7) * 0.3); // smooth, non-degenerate reference series
+    kalmanX.push(kx);
+    kalmanY.push(kx * kfSeedBeta); // near-perfect linear relationship, beta should converge to ~2
+  }
+  const kalmanResult = kalmanPairSignal(kalmanX, kalmanY, { zWindow: 20, zEntryThreshold: 2 });
+  assert(kalmanResult.ready === true, "Kalman pairs signal is ready once enough paired history has been fed in");
+  assert(Math.abs(kalmanResult.beta - kfSeedBeta) < 0.1, "Kalman filter's recursive beta estimate converges close to the true hedge ratio on a near-noiseless series");
+  assert(kalmanResult.signal === "FLAT", "no dislocation on a clean linear series with no injected spread shock -> FLAT signal");
+  const kalmanYShocked = kalmanY.slice();
+  kalmanYShocked[kalmanYShocked.length - 1] += 40; // inject a sudden spread blowout on the final observation
+  const kalmanShockResult = kalmanPairSignal(kalmanX, kalmanYShocked, { zWindow: 20, zEntryThreshold: 2 });
+  assert(kalmanShockResult.signal === "SHORT_Y_LONG_X", "a sudden positive spread shock (Y rich vs X) reads as a SHORT_Y_LONG_X mean-reversion signal");
+  assert(kalmanPairSignal([1, 2, 3], [1, 2, 3]).ready === false, "Kalman pairs signal honestly reports not-ready on insufficient history instead of guessing");
+  const kb = new KalmanBeta({ initialBeta: 1 });
+  const kbStep = kb.update(10, 20);
+  assert(typeof kbStep.beta === "number" && typeof kbStep.spread === "number", "KalmanBeta.update() returns a numeric beta + residual spread for a single step");
+  ok("Kalman-filter pairs cointegration estimator converges its recursive hedge-ratio beta and flags spread z-score dislocations");
 
   // paper broker (persistence disabled for isolation)
   const pb = new PaperBroker(config, { persist: false });
@@ -522,6 +627,19 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(liveGateEngine._called === true, "a confirmed-LIVE price source is allowed to reach the exchange routing path");
   assert(liveGateFill && liveGateFill.mode === "LIVE", "a successful live order is reported with mode=LIVE");
   ok("engine refuses to risk real money on non-LIVE (SIM/stale) price data, even when fully armed");
+
+  // Aegis hard killswitch flatten-all: _flattenAll() must SELL every open
+  // paper position down to cash via the normal execution path
+  const flattenCalls = [];
+  const flattenEngine = {
+    paper: { positions: { "BTC-USD": { qty: 2, avgPrice: 100 }, "ETH-USD": { qty: 0, avgPrice: 0 } } },
+    _execute: async (args) => { flattenCalls.push(args); return { ...args, status: "FILLED" }; },
+  };
+  const flattenResult = await Engine.prototype._flattenAll.call(flattenEngine, { "BTC-USD": { price: 110 }, "ETH-USD": { price: 200 } });
+  assert(flattenCalls.length === 1 && flattenCalls[0].symbol === "BTC-USD" && flattenCalls[0].side === "SELL", "_flattenAll sells only symbols with an actual open position (qty>0), ignoring zero/closed entries");
+  assert(Math.abs(flattenCalls[0].notional - 220) < 1e-9, "_flattenAll sells the full position notional (qty * current price)");
+  assert(flattenResult.length === 1 && flattenResult[0].symbol === "BTC-USD", "_flattenAll reports every position it flattened");
+  ok("Aegis hard killswitch's _flattenAll() liquidates every open paper position via the normal SELL execution path");
 
   // backtester over synthetic history
   const { syntheticCloses } = require("../src/backtest/history");

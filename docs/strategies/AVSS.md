@@ -55,9 +55,38 @@ flags, direction) with no order-placement side effects.
   targetTrailingStopBps: 12,
   minHoldSec: 30,
   maxHoldSec: 120,
+  // Generalized net-opportunity cost model (see below)
+  assumedNotionalUsd: 1000,
+  takerFeeBps: 2,
+  targetSlippageBps: 5,
+  mevRiskDiscountBps: 3,
+  minEdgeBps: 5,
 }
 ```
 
 `minHoldSec`/`maxHoldSec`/`targetTrailingStopBps` are carried through to
 every scan result as a record of the spec's intended exit rule — they are
 not enforced by any running order, since there is no execution path yet.
+
+## Net-opportunity gate (generalized multi-chain formula)
+
+Every candidate's raw `lagBps` is now also run through
+`src/portfolio/netOpportunity.js` — the same "gross dislocation minus every
+real cost" philosophy already used by DNFH's `computeNetEdge()`, generalized
+so it isn't tied to a funding-rate carry specifically. For an AVSS candidate
+(CEX spot vs. perp mark, same account, no chain bridge involved) the cost
+model only needs the fee/slippage/MEV-discount terms — `gasCostUsd` and
+`bridgeCostUsd` are left at 0 by default. Each candidate's result now
+includes a `netOpportunity` object (`grossUsd`, `costBreakdown`, `netUsd`,
+`netBps`, `approved`), and **`triggered` now requires all three of**
+`lagTriggered && flowTriggered && netOpportunity.approved` — a candidate
+that clears the lag and flow-spike bars but wouldn't survive realistic
+execution costs no longer fires.
+
+This is also the implementation for Soveriel spec's **Module C
+("Asymmetric Latency Arbitrageur" on Base/Solana AMM lag)** — it describes
+the same mechanism (detect a cross-venue price lag, require the edge to
+clear real execution costs before acting) that AVSS already implements, so
+no separate module was built for it. The honest gaps above (price-proxy
+flow signal instead of real CVD, CEX spot instead of a live Base DEX feed)
+apply equally to that reading of Module C.

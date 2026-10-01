@@ -41,7 +41,7 @@ class Engine {
     this.wallet = new WalletManager(config);
     // Delta-neutral funding harvest: manual, cross-venue (Base spot +
     // HyperLiquid perp short), never called by the auto-rotation loop.
-    this.dnfh = new DnfhEngine({ exchanges: this.exchanges, wallet: this.wallet, config });
+    this.dnfh = new DnfhEngine({ exchanges: this.exchanges, wallet: this.wallet, config, risk: this.risk });
     // AVSS: scan/report-only cross-venue lag + flow-spike detector. No
     // execution path — see src/signals/avss.js header for why.
     this.avss = new AvssScanner({ exchanges: this.exchanges, market: this.market, config });
@@ -160,6 +160,16 @@ class Engine {
     // 3) Risk + rebalance toward targets
     const equity = this.paper.equity(prices);
     this.risk.updateEquity(equity);
+    // Aegis hard killswitch: the instant it fires, flatten everything to
+    // cash — a halt alone only blocks NEW entries, it doesn't do anything
+    // about existing exposure still sitting in the drawdown.
+    if (this.risk.justTriggeredHardHalt) {
+      const flattened = await this._flattenAll(prices);
+      if (flattened.length) {
+        log.warn("ENGINE", `AEGIS HARD KILLSWITCH: flattened ${flattened.length} position(s) to cash — ${this.risk.haltReason}`);
+        this.notifier.notifyHalt?.(this.risk.haltReason, flattened);
+      }
+    }
     this.risk.updateMarketStress(this.lastVolatility);
     this.lastSpearRisk = this.capitalRing.enabled ? this.capitalRing.updateSpearRisk(this.paper, equity, prices) : null;
     const minTradeUsd = this.config.capital.minTradeUsd || 1;
@@ -238,6 +248,27 @@ class Engine {
     const state = this.snapshot();
     this._emit(state);
     return state;
+  }
+
+  /**
+   * Aegis hard-killswitch response: sell every open paper position down to
+   * cash, right now. Reuses the existing SELL execution path (same fees/
+   * slippage model, same fill recording) — this is not a special "panic"
+   * code path, just the normal rotation-out logic applied to everything at
+   * once. Only operates on the paper ledger; live trading is already
+   * blocked the moment this.risk.halted is true (assess() refuses all new
+   * BUYs), and this app never auto-places live SELL orders unattended.
+   */
+  async _flattenAll(prices) {
+    const flattened = [];
+    for (const [symbol, pos] of Object.entries({ ...this.paper.positions })) {
+      const price = prices[symbol]?.price;
+      if (!price || !(pos.qty > 0)) continue;
+      const notional = pos.qty * price;
+      const fill = await this._execute({ symbol, side: "SELL", notional, price, tag: "aegis-flatten" });
+      if (fill) flattened.push({ symbol, fill });
+    }
+    return flattened;
   }
 
   async _execute({ symbol, side, notional, price, tag }) {

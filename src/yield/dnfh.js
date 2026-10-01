@@ -62,10 +62,16 @@ const store = require("./dnfhStore");
 const HOURS_PER_YEAR = 24 * 365;
 
 class DnfhEngine {
-  constructor({ exchanges, wallet, config }) {
+  constructor({ exchanges, wallet, config, risk = null }) {
     this.exchanges = exchanges;
     this.wallet = wallet;
     this.config = config;
+    // Optional: the shared RiskManager instance (Aegis Guardian). When
+    // wired in, planPosition() respects its live leverage ceiling (1x
+    // while soft-braked or hard-halted) on top of the exchange's own
+    // configured maxLeverage. DNFH remains usable standalone/offline
+    // without a risk instance (defaults to unconstrained == no extra cap).
+    this.risk = risk;
   }
 
   get dnfhConfig() {
@@ -222,10 +228,16 @@ class DnfhEngine {
     }
     if (!(Number(usdNotional) > 0)) throw new Error("usdNotional must be > 0");
 
-    const maxAllowed = Number(this.config.exchanges?.hyperliquid?.maxLeverage ?? 2);
+    const exchangeMaxLeverage = Number(this.config.exchanges?.hyperliquid?.maxLeverage ?? 2);
+    // Aegis Guardian leverage ceiling: 1x while the account is soft-braked
+    // or hard-halted, Infinity (no extra cap) otherwise. Whichever is
+    // tighter wins — Aegis can only ever make this MORE conservative.
+    const aegisMaxLeverage = this.risk ? this.risk.maxLeverageCap() : Infinity;
+    const maxAllowed = Math.min(exchangeMaxLeverage, aegisMaxLeverage);
     const lev = Math.min(Number(leverage) || 1, maxAllowed);
     if (Number(leverage) > maxAllowed) {
-      log.warn("DNFH", `requested leverage ${leverage}x capped to ${maxAllowed}x — this is a yield-harvest tool, not a leverage play`);
+      const reason = aegisMaxLeverage < exchangeMaxLeverage ? "Aegis soft brake / hard halt" : "this is a yield-harvest tool, not a leverage play";
+      log.warn("DNFH", `requested leverage ${leverage}x capped to ${maxAllowed}x — ${reason}`);
     }
 
     const entryThreshold = Number(this.dnfhConfig.entryThresholdAnnualPct ?? 22);

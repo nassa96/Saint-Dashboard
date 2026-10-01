@@ -10,6 +10,7 @@ const PaperBroker = require("../src/paper/broker");
 const MemecoinScanner = require("../src/memecoin/scanner");
 const volatilityRadar = require("../src/volatility/predictor");
 const marketMaking = require("../src/signals/strategies/marketMaking");
+const fibonacci = require("../src/signals/strategies/fibonacci");
 const { sortinoRatio } = require("../src/portfolio/sortino");
 const mevDefense = require("../src/wallet/mevDefense");
 const HyperLiquid = require("../src/exchange/hyperliquid");
@@ -40,6 +41,22 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(ind.momentum(rising, 10) > 0, "momentum positive");
   assert(ind.volatility(rising, 20) != null, "volatility");
   ok("indicators compute correctly");
+
+  // OHLCV-dependent indicators: ATR, stochastic, swing range, Fibonacci levels
+  const upBars = Array.from({ length: 60 }, (_, i) => {
+    const base = 100 + i * 0.6;
+    return { ts: i, open: base - 0.1, high: base + 0.5, low: base - 0.5, close: base, volume: 1000 - i * 5 };
+  });
+  const atrVal = ind.atr(upBars, 14);
+  assert(atrVal != null && atrVal > 0, "atr computes a positive value from real OHLC bars");
+  const stoch = ind.stochastic(upBars, 14, 3);
+  assert(stoch && stoch.k >= 0 && stoch.k <= 100 && stoch.d >= 0 && stoch.d <= 100, "stochastic %K/%D bounded 0-100");
+  const swing = ind.swingRange(upBars, 40);
+  assert(swing && swing.high > swing.low, "swing range finds a valid high/low leg");
+  const fib = ind.fibLevels(swing.low, swing.high, "up");
+  assert(fib.retracements.r618 < fib.retracements.r500 && fib.retracements.r500 < fib.retracements.r382, "retracement levels order correctly (deeper ratio = lower price in an uptrend)");
+  assert(fib.extensions.e1618 > fib.extensions.e1272 && fib.extensions.e2618 > fib.extensions.e1618, "extension levels increase with ratio");
+  ok("ATR, stochastic oscillator, swing-range and Fibonacci level helpers compute correctly from OHLCV bars");
 
   // extreme volatility radar — real EWMA/realized vol, bounded outputs, no randomness
   const calmSeries = Array.from({ length: 150 }, (_, i) => 100 + Math.sin(i / 40) * 0.5);
@@ -174,6 +191,40 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
     "full inventory skews reservation price down (lean against existing size)"
   );
   ok("Avellaneda-Stoikov market-making strategy computes inventory-aware reservation price + spread");
+
+  // micro-capital gamma scaling — tiny equity should widen effective gamma
+  // (up to the configured cap) so quotes stay meaningfully wide/defensive
+  // relative to a well-capitalized book, per the spec's targetCapital design.
+  const mmBigEquity = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 0, equity: 1000 });
+  const mmTinyEquity = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 0, equity: 50 });
+  assert(mmBigEquity.indicators.gammaMultiplier === 1, "gamma multiplier is 1x at/above target capital");
+  assert(mmTinyEquity.indicators.gammaMultiplier > 1, "gamma multiplier scales up below target capital");
+  assert(mmTinyEquity.indicators.gammaMultiplier <= 6, "gamma multiplier respects the configured cap");
+  assert(mmTinyEquity.indicators.gamma > mmBigEquity.indicators.gamma, "scaled gamma is larger for the micro-capital book");
+  ok("market-making gamma scales up for micro-capital accounts and caps out per maxGammaMultiplier");
+
+  // Fibonacci confluence strategy — uptrend, pull back into the golden
+  // pocket on declining volume, with stochastic momentum turning up
+  const fibBars = [];
+  for (let i = 0; i < 50; i++) {
+    const c = 80 + (100 - 80) * (i / 49);
+    fibBars.push({ ts: i, open: c - 0.1, high: c + 0.3, low: c - 0.3, close: c, volume: 500 });
+  }
+  for (let i = 0; i < 25; i++) {
+    const c = 100 + (150 - 100) * (i / 24);
+    fibBars.push({ ts: 50 + i, open: c - 0.2, high: c + 0.6, low: c - 0.6, close: c, volume: 800 - i * 10 });
+  }
+  [148, 145, 140, 135, 130, 126, 123, 121, 119.5, 118.5, 117.8, 117.3, 117.6, 118.3, 118.8].forEach((c, i) => {
+    fibBars.push({ ts: 75 + i, open: c + 0.2, high: c + 0.5, low: c - 0.5, close: c, volume: 300 - i * 5 });
+  });
+  const fibPrices = fibBars.map((b) => b.close);
+  const fibResult = fibonacci.evaluate(fibPrices, {}, { bars: fibBars });
+  assert(fibResult.signal === "LONG", "fibonacci strategy fires LONG on a golden-pocket pullback with momentum + volume confirmation");
+  assert(fibResult.indicators.goldenPocket.inside === true, "golden pocket band correctly contains the pullback price");
+  assert(fibResult.indicators.tpPlan.tp2.price > fibResult.indicators.tpPlan.tp1.price, "take-profit ladder levels increase tier over tier");
+  const fibNoSignal = fibonacci.evaluate(fibPrices.slice(0, 70), {}, { bars: fibBars.slice(0, 70) });
+  assert(fibNoSignal.signal === "FLAT", "fibonacci strategy stays FLAT before price reaches the golden pocket");
+  ok("Fibonacci confluence strategy (AWP spear-pool entry) confirms golden-pocket pullbacks with momentum + volume, computes TP ladder");
 
   // MEV defense — read-only risk assessment + execution planning, no network calls
   const lowImpactQuote = { priceImpactPct: 0.002 };

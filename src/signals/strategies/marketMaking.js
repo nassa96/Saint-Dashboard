@@ -33,11 +33,20 @@
 const { ewmaVol } = require("../../volatility/predictor");
 
 const defaultParams = {
-  gamma: 0.15, // risk aversion — higher = skews harder away from inventory, wants wider edge
+  gamma: 0.15, // base risk aversion — higher = skews harder away from inventory, wants wider edge
   kappa: 1.2, // liquidity proxy — higher = assumes a deeper book = tighter required edge
   horizonBars: 30, // stand-in for "time left" in the A-S formula
   entryThreshold: 0.15,
   minBars: 40,
+  // Micro-capital gamma scaling: gamma_t = gamma * clamp(targetCapital /
+  // currentEquity, 1, maxGammaMultiplier). As equity shrinks below
+  // targetCapital, risk aversion scales UP — the reservation price shifts
+  // more aggressively away from accumulated inventory, forcing faster
+  // rebalancing before fee drag and a single bad fill can hurt a small
+  // account disproportionately. Never scales gamma down below base (a
+  // multiplier floor of 1) just because an account got bigger than target.
+  targetCapital: 1000,
+  maxGammaMultiplier: 6,
 };
 
 // Small, bounded search space for the optimizer.
@@ -66,14 +75,22 @@ function evaluate(prices, params = {}, context = {}) {
   // book, so q is clamped to [0,1] (no real short inventory in this engine).
   const q = Math.max(0, Math.min(1, context.inventoryRatio || 0));
 
+  // Micro-capital gamma scaling (floor at 1x — only ever scales UP for
+  // small accounts, never relaxes risk aversion below the configured base).
+  const equity = Number(context.equity) > 0 ? Number(context.equity) : p.targetCapital;
+  const gammaMultiplier = Math.max(1, Math.min(p.maxGammaMultiplier, p.targetCapital / equity));
+  const gamma = p.gamma * gammaMultiplier;
+
   const variance = sigma * sigma;
-  const reservation = s - q * p.gamma * variance * p.horizonBars * s;
-  const spread = p.gamma * variance * p.horizonBars * s + (2 / p.gamma) * Math.log(1 + p.gamma / p.kappa) * s * sigma;
+  const reservation = s - q * gamma * variance * p.horizonBars * s;
+  const spread = gamma * variance * p.horizonBars * s + (2 / gamma) * Math.log(1 + gamma / p.kappa) * s * sigma;
 
   indicators.sigma = sigma;
   indicators.reservationPrice = reservation;
   indicators.optimalSpread = spread;
   indicators.inventoryRatio = q;
+  indicators.gamma = gamma;
+  indicators.gammaMultiplier = gammaMultiplier;
 
   const halfSpread = spread / 2;
   const edge = reservation - s; // positive => model thinks price should be higher than market => cheap
@@ -87,7 +104,7 @@ function evaluate(prices, params = {}, context = {}) {
   reasons.push(
     `A-S reservation $${reservation.toFixed(4)} vs last $${s.toFixed(4)} (edge ${(edge / s * 100).toFixed(3)}%)`
   );
-  reasons.push(`optimal half-spread ${(halfSpread / s * 100).toFixed(3)}% (gamma=${p.gamma}, kappa proxy=${p.kappa})`);
+  reasons.push(`optimal half-spread ${(halfSpread / s * 100).toFixed(3)}% (gamma=${gamma.toFixed(3)}${gammaMultiplier > 1 ? ` [${gammaMultiplier.toFixed(2)}x micro-capital scale]` : ""}, kappa proxy=${p.kappa})`);
   if (q > 0) reasons.push(`inventory skew q=${q.toFixed(2)} pulling reservation down (lean against existing size)`);
 
   // Confidence: how far outside the spread band, damped by how thin our

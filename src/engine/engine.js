@@ -117,7 +117,8 @@ class Engine {
       const currentNotional = price ? this.paper.symbolExposure(symbol, price) : 0;
       const maxNotional = preEquity * this.config.capital.maxPositionPct;
       const inventoryRatio = maxNotional > 0 ? Math.max(0, Math.min(1, currentNotional / maxNotional)) : 0;
-      const evalResult = strategy.evaluate(series, { strategy: stratName, context: { inventoryRatio } });
+      const bars = this.market.getBars(symbol);
+      const evalResult = strategy.evaluate(series, { strategy: stratName, context: { inventoryRatio, equity: preEquity, bars } });
       return { symbol, price, strategy: stratName, ...evalResult };
     });
     this.lastEvaluations = evaluations;
@@ -313,6 +314,11 @@ class Engine {
         .catch((e) => log.error("INTELLIGENCE", `macro flow refresh failed: ${e.message}`));
     runMacro();
     this._macroLoop = setInterval(runMacro, 5 * 60 * 1000);
+    // real OHLCV bars (5-min candles) for bar-dependent strategies (ATR,
+    // stochastic, Fibonacci swing detection) — slow cadence, not every tick
+    const runBars = () => this.market.refreshBars(300).catch((e) => log.error("MARKET", `bar refresh failed: ${e.message}`));
+    runBars();
+    this._barsLoop = setInterval(runBars, 5 * 60 * 1000);
     // exchange health on startup
     this.exchanges.healthCheck().catch(() => {});
     // kick an immediate tick
@@ -324,6 +330,7 @@ class Engine {
     clearInterval(this._loop);
     clearInterval(this._scanLoop);
     clearInterval(this._macroLoop);
+    clearInterval(this._barsLoop);
     log.info("ENGINE", "Stopped");
   }
 

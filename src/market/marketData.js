@@ -18,6 +18,7 @@ class MarketData {
     this.universe = universe; // e.g. ["BTC-USD","ETH-USD"]
     this.history = {}; // symbol -> [{ts, price}]
     this.latest = {}; // symbol -> { price, source, ts, change24h }
+    this.bars = {}; // symbol -> [{ts, open, high, low, close, volume, source}] — real OHLCV candles
     this.source = "UNKNOWN"; // LIVE | SIM
     this.lastError = null;
     // seed synthetic anchors for fallback so numbers look plausible
@@ -47,6 +48,66 @@ class MarketData {
 
   getPrices(symbol) {
     return (this.history[symbol] || []).map((p) => p.price);
+  }
+
+  /** Real OHLCV bars (oldest -> newest). Needed by strategies that require
+   *  more than a close price: ATR, stochastic, swing-high/low/Fibonacci. */
+  getBars(symbol, limit = 200) {
+    return (this.bars[symbol] || []).slice(-limit);
+  }
+
+  /**
+   * Refresh real OHLCV candles from Coinbase's public candles endpoint
+   * (no key needed). Runs on its own slow cadence (minutes), separate from
+   * the fast per-tick price loop used for execution decisions — candles
+   * don't need to update every 5s. Falls back to synthesizing bars from the
+   * tick-price history when candles are unreachable, clearly tagged "SIM".
+   */
+  async refreshBars(granularity = 300, count = 200) {
+    for (const symbol of this.universe) {
+      try {
+        const data = await httpJson(
+          `https://api.exchange.coinbase.com/products/${symbol}/candles?granularity=${granularity}`,
+          { timeout: 7000, headers: { "User-Agent": "saint-dashboard/2.0" } }
+        );
+        // Coinbase returns [time, low, high, open, close, volume], newest first
+        const candles = (data || []).slice(0, count).reverse();
+        if (!candles.length) throw new Error("no candles");
+        this.bars[symbol] = candles.map((c) => ({
+          ts: c[0] * 1000,
+          low: c[1],
+          high: c[2],
+          open: c[3],
+          close: c[4],
+          volume: c[5],
+          source: "LIVE",
+        }));
+      } catch (e) {
+        // Synthetic fallback: derive a single coarse bar per recent tick-
+        // history window so bar-dependent strategies still have *something*
+        // to work with offline — always tagged "SIM", never passed off as real.
+        const ticks = this.history[symbol] || [];
+        if (ticks.length < 5) continue;
+        const bucket = Math.max(1, Math.floor(granularity / 5)); // ~5s ticks per bucket
+        const synthBars = [];
+        for (let i = 0; i < ticks.length; i += bucket) {
+          const slice = ticks.slice(i, i + bucket);
+          if (!slice.length) continue;
+          const closes = slice.map((t) => t.price);
+          synthBars.push({
+            ts: slice[slice.length - 1].ts,
+            open: closes[0],
+            high: Math.max(...closes),
+            low: Math.min(...closes),
+            close: closes[closes.length - 1],
+            volume: null,
+            source: "SIM",
+          });
+        }
+        if (synthBars.length) this.bars[symbol] = synthBars.slice(-count);
+      }
+    }
+    return this.bars;
   }
 
   snapshot() {

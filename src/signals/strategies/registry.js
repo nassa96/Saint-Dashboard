@@ -8,12 +8,14 @@
 const momentum = require("./momentum");
 const meanReversion = require("./meanReversion");
 const marketMaking = require("./marketMaking");
+const fibonacci = require("./fibonacci");
 const placeholders = require("./placeholders");
 
 const STRATEGIES = {
   momentum,
   meanreversion: meanReversion,
   marketmaking: marketMaking,
+  fibonacci,
   ...placeholders.STRATEGIES,
 };
 

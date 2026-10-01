@@ -12,10 +12,22 @@ const volatilityRadar = require("../src/volatility/predictor");
 const marketMaking = require("../src/signals/strategies/marketMaking");
 const { sortinoRatio } = require("../src/portfolio/sortino");
 const mevDefense = require("../src/wallet/mevDefense");
+const HyperLiquid = require("../src/exchange/hyperliquid");
+const ExchangeManager = require("../src/exchange/manager");
+const { TronWallet } = require("../src/wallet/tron");
 const Engine = require("../src/engine/engine");
 
 let passed = 0;
 const ok = (name) => { console.log("  ✓", name); passed++; };
+async function assertThrowsAsync(fn, expectedSubstring, message) {
+  try {
+    await fn();
+  } catch (e) {
+    assert(e.message.includes(expectedSubstring), `${message} (got: ${e.message})`);
+    return;
+  }
+  assert.fail(`${message} — expected a throw containing "${expectedSubstring}"`);
+}
 
 (async () => {
   // indicators
@@ -124,6 +136,26 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   const noSplitPlan = mevDefense.planExecution(50, lowRisk, { splitThresholdUsd: 250, maxChunks: 4 });
   assert(noSplitPlan.chunks === 1, "small + low-risk swap stays single-shot");
   ok("MEV defense assesses sandwich exposure from quote data + plans tranched execution");
+
+  // HyperLiquid — monitor-only safety contract: reads need no secret, perps
+  // never enter the auto-rotation engine's venue pool.
+  const hl = new HyperLiquid({ walletAddress: "", privateKey: "" });
+  assert(hl.hasCredentials() === false, "hyperliquid reports no credentials without a wallet address");
+  const hlWithAddr = new HyperLiquid({ walletAddress: "0x0000000000000000000000000000000000000000" });
+  assert(hlWithAddr.hasCredentials() === true, "a public wallet address alone is enough for hyperliquid reads");
+  await assertThrowsAsync(() => hlWithAddr.placeOrder({ symbol: "BTC-PERP", side: "BUY", quantity: 1, limitPrice: 1 }, true), "no HYPERLIQUID_API_PRIVATE_KEY", "hyperliquid refuses orders without a dedicated API-wallet key");
+  const emHL = new ExchangeManager({ ...config, exchanges: { ...config.exchanges, primary: "hyperliquid" } });
+  assert(emHL.primary !== "hyperliquid", "engine refuses to auto-select a leveraged/perps venue as the spot rotation primary");
+  assert(emHL.spotVenues.includes("coinbase") && !emHL.spotVenues.includes("hyperliquid"), "hyperliquid excluded from spot venue pool");
+  await assertThrowsAsync(() => emHL.placeManualLeveragedOrder({ symbol: "BTC-PERP", side: "BUY", quantity: 1, limitPrice: 1 }), "LIVE TRADING DISARMED", "manual leveraged order path still requires the full live-arm gate");
+  ok("HyperLiquid wired as monitor-only: no secret needed to read, never auto-selected for spot rotation, orders stay gated");
+
+  // Tron — honest refusal: reads don't need swaps to exist
+  const tron = new TronWallet({ tron: { address: "", privateKey: "", apiBase: "https://api.trongrid.io" } });
+  assert(tron.hasKey() === false, "tron reports no key when unconfigured");
+  await assertThrowsAsync(() => tron.quote(), "no vetted", "tron refuses to quote without a vetted aggregator configured");
+  await assertThrowsAsync(() => tron.swap(), "BLOCKED", "tron refuses to swap without a vetted aggregator configured");
+  ok("Tron connector refuses swaps honestly instead of routing funds through an unverified relay");
 
   // paper broker (persistence disabled for isolation)
   const pb = new PaperBroker(config, { persist: false });
@@ -310,7 +342,6 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   try { fs3.unlinkSync(credStore.STORE_PATH); } catch {}
   credStore.set("kraken", { key: "abc", secret: "xyz" });
   assert(credStore.load().kraken.key === "abc", "credStore persists venue keys");
-  const ExchangeManager = require("../src/exchange/manager");
   const em = new ExchangeManager(config);
   assert(em.venues.kraken.hasCredentials(), "manager loads saved credentials on boot");
   em.disconnect("kraken");

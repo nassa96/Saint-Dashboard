@@ -11,8 +11,15 @@
 const BinanceUS = require("./binanceus");
 const Coinbase = require("./coinbase");
 const Kraken = require("./kraken");
+const HyperLiquid = require("./hyperliquid");
 const credStore = require("./credStore");
 const log = require("../util/logger");
+
+// Venues whose order shape the auto-rotation engine's spot order builder
+// understands (notional BUY/SELL of an asset you fully own). HyperLiquid is
+// a leveraged perps venue with a different order shape/risk model, so it's
+// monitorable but deliberately excluded from ever being auto-selected here.
+const SPOT_VENUES = ["binanceus", "coinbase", "kraken"];
 
 class ExchangeManager {
   constructor(config) {
@@ -22,8 +29,16 @@ class ExchangeManager {
       binanceus: new BinanceUS(config.exchanges.binanceus, opts),
       coinbase: new Coinbase(config.exchanges.coinbase, opts),
       kraken: new Kraken(config.exchanges.kraken, opts),
+      hyperliquid: new HyperLiquid(config.exchanges.hyperliquid, opts),
     };
-    this.primary = config.exchanges.primary;
+    this.spotVenues = SPOT_VENUES;
+    this.primary = SPOT_VENUES.includes(config.exchanges.primary) ? config.exchanges.primary : "coinbase";
+    if (config.exchanges.primary && !SPOT_VENUES.includes(config.exchanges.primary)) {
+      log.warn(
+        "EXCHANGE",
+        `PRIMARY_EXCHANGE="${config.exchanges.primary}" is not an auto-tradable spot venue (leveraged/perp venues are monitor-only) — falling back to coinbase for the rotation engine.`
+      );
+    }
     this.status = {};
 
     // Apply any credentials saved at runtime via the Connections page.
@@ -139,6 +154,23 @@ class ExchangeManager {
     log.warn("EXCHANGE", `ARMED LIVE ORDER -> ${v.name} ${order.side} ${order.symbol}`);
     return v.placeOrder(order, true);
   }
+
+  /**
+   * Manual, explicitly-invoked LEVERAGED order on HyperLiquid. Separate
+   * choke-point from routeLiveOrder on purpose — this is never called by
+   * the automatic rotation loop (see src/exchange/hyperliquid.js header).
+   * Still requires the full live-arm gate, same as every other real order.
+   */
+  async placeManualLeveragedOrder(order) {
+    if (!this.config.canTradeLive()) {
+      throw new Error(
+        "LIVE TRADING DISARMED — need TRADING_MODE=LIVE, LIVE_TRADING_ENABLED=true, and LIVE_TRADING_CONFIRM='I ACCEPT THE RISK'"
+      );
+    }
+    log.warn("EXCHANGE", `ARMED MANUAL LEVERAGED ORDER -> hyperliquid ${order.side} ${order.symbol}`);
+    return this.venues.hyperliquid.placeOrder(order, true);
+  }
+
 
   snapshot() {
     return {

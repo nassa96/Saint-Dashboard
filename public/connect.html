@@ -72,13 +72,38 @@
 
     <!-- WALLET -->
     <div class="card">
-      <h3>On-chain wallet</h3>
-      <div class="desc">Self-custody swaps (Solana / EVM). Quotes are always read-only; real swaps stay hard-gated.</div>
+      <h3>On-chain wallet (server-side execution keys)</h3>
+      <div class="desc">Self-custody swaps (Solana / EVM). Quotes are always read-only; real swaps stay hard-gated. Tron balance reads work; Tron swaps are intentionally disabled (see docs/TRON_SWAP.md). HyperLiquid is monitor-only (perps, not spot).</div>
       <div id="wallet"></div>
       <div class="warn" style="margin-top:12px">
         A wallet <b>private key</b> controls all your funds, so — unlike exchange keys — it is <b>never</b> accepted through this web form.
-        Set it once in <code>.env</code> on your server (<code>SOLANA_PRIVATE_KEY</code> or <code>EVM_PRIVATE_KEY</code>) and restart. This page shows its status.
+        Set it once in <code>.env</code> on your server (<code>SOLANA_PRIVATE_KEY</code>, <code>EVM_PRIVATE_KEY</code>, <code>TRON_PRIVATE_KEY</code>, or <code>HYPERLIQUID_API_PRIVATE_KEY</code>) and restart. This page shows its status.
       </div>
+    </div>
+
+    <!-- BROWSER WALLET CONNECT (read-only, no seed phrase, no key, ever) -->
+    <div class="card">
+      <h3>🔌 Connect a wallet from your browser (read-only)</h3>
+      <div class="desc">
+        This asks your wallet extension for its <b>public address only</b> — never a seed phrase, never a private key, never a signature.
+        No funds can move from this. It's the safest possible way to just <i>look</i> at a wallet's balance on the dashboard.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button onclick="connectInjectedEvm()">🦊 MetaMask / Coinbase Wallet / Trust Wallet</button>
+        <button onclick="connectPhantom()">👻 Phantom (Solana)</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <select id="manual-chain" class="mini-select" style="background:#060911;border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:8px">
+          <option value="tron">Tron</option>
+          <option value="ethereum">Ethereum</option>
+          <option value="base">Base</option>
+          <option value="bsc">BNB Chain</option>
+          <option value="solana">Solana</option>
+        </select>
+        <input id="manual-address" placeholder="paste a PUBLIC address (never a seed phrase or private key)" style="min-width:320px">
+        <button onclick="lookupManual()">Look up balance</button>
+      </div>
+      <div id="connected-wallets"></div>
     </div>
 
     <div class="card">
@@ -152,6 +177,7 @@ window.test=async n=>{
 
 async function loadWallet(){
   const w=await jget('/api/wallet/status');
+  const hl=await jget('/api/exchanges/health').catch(()=>({}));
   $("#wallet").innerHTML=`
     <div class="venue"><div class="name">Solana</div>
       <span class="badge ${w.solana.hasKey?'b-on':'b-off'}">${w.solana.hasKey?'🔑 key in .env':'no key'}</span>
@@ -160,8 +186,59 @@ async function loadWallet(){
       <span class="badge ${w.evm.hasKey?'b-on':'b-off'}">${w.evm.hasKey?'🔑 key in .env':'no key'}</span>
       <span class="badge ${w.evm.quotesReady?'b-on':'b-warn'}">${w.evm.quotesReady?'quotes ready':'no 0x key'}</span>
       <span class="fees">${w.evm.chain||''} ${w.evm.address||''}</span></div>
+    <div class="venue"><div class="name">Tron</div>
+      <span class="badge ${w.tron?.hasKey||w.tron?.address?'b-on':'b-off'}">${w.tron?.address?'address configured':'no address'}</span>
+      <span class="badge b-warn">swaps disabled</span>
+      <span class="fees">${w.tron?.address||''}</span></div>
+    <div class="venue"><div class="name">HyperLiquid</div>
+      <span class="badge ${hl.hyperliquid?.hasCredentials?'b-on':'b-off'}">${hl.hyperliquid?.hasCredentials?'address configured':'no address'}</span>
+      <span class="badge ${hl.hyperliquid?.reachable?'b-on':'b-warn'}">${hl.hyperliquid?.reachable?'✓ reachable':'⚠ unreachable'}</span>
+      <span class="fees">monitor-only (leveraged perps)</span></div>
     <div class="note">On-chain swaps armed: <b>${w.onchainArmed?'YES':'NO (safe)'}</b> · max swap $${w.maxSwapUsd} · slippage ${w.slippageBps} bps</div>`;
 }
+
+// ---- Browser wallet connect: PUBLIC ADDRESS ONLY, never a key/phrase/signature ----
+function renderConnected(chain, address, result){
+  const el=$("#connected-wallets");
+  const bal = result?.balances?.map(b=>`${b.asset}: ${Number(b.free).toLocaleString(undefined,{maximumFractionDigits:6})}`).join(' · ') || 'no balance data';
+  const div=document.createElement('div');
+  div.className='venue';
+  div.innerHTML=`<div class="name">${chain}</div><span class="fees" style="margin-left:0">${address}</span><div style="flex-basis:100%;color:var(--muted);font-size:11px;margin-top:4px">${bal}</div>`;
+  el.prepend(div);
+}
+
+window.connectInjectedEvm = async () => {
+  if (!window.ethereum) { alert('No injected EVM wallet found. Install MetaMask, Coinbase Wallet, or Trust Wallet.'); return; }
+  try {
+    // eth_requestAccounts only ever reveals the PUBLIC address — it cannot
+    // move funds, sign anything, or reveal a key/seed phrase.
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const address = accounts[0];
+    const result = await jpost('/api/wallet/lookup', { chain: 'ethereum', address });
+    renderConnected('EVM wallet (Ethereum balance shown; same address works on Base/BNB)', address, result);
+  } catch (e) { alert('Connect failed/rejected: ' + e.message); }
+};
+
+window.connectPhantom = async () => {
+  if (!window.solana || !window.solana.isPhantom) { alert('Phantom not found. Install the Phantom extension.'); return; }
+  try {
+    // connect() only asks the user to approve sharing the PUBLIC key.
+    const resp = await window.solana.connect();
+    const address = resp.publicKey.toString();
+    const result = await jpost('/api/wallet/lookup', { chain: 'solana', address });
+    renderConnected('Phantom (Solana)', address, result);
+  } catch (e) { alert('Connect failed/rejected: ' + e.message); }
+};
+
+window.lookupManual = async () => {
+  const chain = $("#manual-chain").value;
+  const address = ($("#manual-address").value || '').trim();
+  if (!address) return alert('Paste a public address first.');
+  try {
+    const result = await jpost('/api/wallet/lookup', { chain, address });
+    renderConnected(chain, address, result);
+  } catch (e) { alert('Lookup failed: ' + e.message); }
+};
 
 async function loadLive(){
   const s=await jget('/api/live/status');

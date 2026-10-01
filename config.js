@@ -136,6 +136,14 @@ const config = {
       key: process.env.KRAKEN_API_KEY || "",
       secret: process.env.KRAKEN_API_SECRET || "",
     },
+    // Perps DEX — monitor-only by default. Reads need ONLY a public wallet
+    // address (no key of any kind). privateKey (optional) should be a
+    // dedicated Hyperliquid "API wallet" key that can only trade, never
+    // withdraw — never your main wallet's key. See docs/VENUES.md.
+    hyperliquid: {
+      walletAddress: process.env.HYPERLIQUID_WALLET_ADDRESS || "",
+      privateKey: process.env.HYPERLIQUID_API_PRIVATE_KEY || "",
+    },
   },
 
   memecoin: {
@@ -157,6 +165,16 @@ const config = {
       chain: (process.env.EVM_CHAIN || "base").toLowerCase(),
       rpc: process.env.EVM_RPC || "",
       zeroxApiKey: process.env.ZEROX_API_KEY || "",
+    },
+    // Tron — read-only balance monitoring works out of the box (public
+    // TronGrid API). Swaps are intentionally disabled until a vetted
+    // aggregator is configured; see docs/TRON_SWAP.md.
+    tron: {
+      address: process.env.TRON_ADDRESS || "", // for read-only monitoring w/ no key at all
+      privateKey: process.env.TRON_PRIVATE_KEY || "",
+      apiBase: process.env.TRON_API_BASE || "https://api.trongrid.io",
+      apiKey: process.env.TRONGRID_API_KEY || "",
+      sunswapApiKey: process.env.SUNSWAP_API_KEY || "",
     },
     // MEV defense (protects YOUR swaps from being sandwiched — see
     // src/wallet/mevDefense.js). All optional; safe no-op defaults.

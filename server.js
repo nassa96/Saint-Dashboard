@@ -135,6 +135,24 @@ app.post("/api/exchanges/disconnect", (req, res) => {
   }
 });
 
+// HyperLiquid — monitor-only by default (reads need just a public address).
+// Manual leveraged order placement is a SEPARATE, explicitly-invoked action,
+// never called by the automatic rotation loop. Still requires full live-arm.
+app.post("/api/hyperliquid/order", async (req, res) => {
+  try {
+    const { symbol, side, quantity, limitPrice, reduceOnly } = req.body || {};
+    if (!symbol || !side || !quantity || !limitPrice) {
+      return res.status(400).json({ error: "symbol, side, quantity, limitPrice are required" });
+    }
+    const result = await engine.exchanges.placeManualLeveragedOrder({
+      symbol, side, quantity, limitPrice, reduceOnly,
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ---- Live trading arm / disarm (the one-click kill switch) ----
 app.get("/api/live/status", (req, res) => {
   const s = config.liveStatus();
@@ -247,6 +265,20 @@ app.post("/api/walkforward", async (req, res) => {
 
 // On-chain wallet: status, read-only quote, and gated swap
 app.get("/api/wallet/status", (req, res) => res.json(engine.wallet.status()));
+
+// Fully read-only balance lookup for ANY public address — no key, no
+// signature, no approval. Pairs with the browser wallet-connect button
+// (MetaMask/Coinbase Wallet/Trust Wallet/Phantom) which only ever asks for
+// the public address, never a signature, until an explicit swap happens.
+const addressLookup = require("./src/wallet/addressLookup");
+app.post("/api/wallet/lookup", async (req, res) => {
+  try {
+    const { chain, address } = req.body || {};
+    res.json(await addressLookup.lookup(chain, address, { config }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 
 app.post("/api/wallet/quote", async (req, res) => {
   try {

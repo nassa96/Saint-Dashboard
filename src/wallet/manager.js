@@ -7,6 +7,7 @@
 
 const { SolanaWallet, USDC_MINT } = require("./solana");
 const { EvmWallet } = require("./evm");
+const { TronWallet } = require("./tron");
 const mevDefense = require("./mevDefense");
 const log = require("../util/logger");
 
@@ -16,11 +17,13 @@ class WalletManager {
     this.cfg = config.wallet;
     this.solana = new SolanaWallet(this.cfg);
     this.evm = new EvmWallet(this.cfg);
+    this.tron = new TronWallet(this.cfg);
   }
 
   _forChain(chain) {
     if (chain === "solana") return { kind: "solana", w: this.solana };
     if (["ethereum", "base", "bsc"].includes(chain)) return { kind: "evm", w: this.evm };
+    if (chain === "tron") return { kind: "tron", w: this.tron };
     throw new Error(`unsupported chain: ${chain}`);
   }
 
@@ -46,12 +49,19 @@ class WalletManager {
         rpc: this.evm.rpc,
         quotesReady: Boolean(this.cfg.evm.zeroxApiKey),
       },
+      tron: {
+        hasKey: this.tron.hasKey(),
+        address: this.tron.address(),
+        swapsReady: false,
+        note: "balance reads work; swaps disabled until a vetted aggregator is configured — see docs/TRON_SWAP.md",
+      },
     };
   }
 
   /** Read-only price quote. Never moves funds. */
   async quote({ chain, tokenAddress, amountRaw, sellToken }) {
     const { kind, w } = this._forChain(chain);
+    if (kind === "tron") return w.quote();
     if (kind === "solana") {
       return w.quote({ inputMint: sellToken || USDC_MINT, outputMint: tokenAddress, amount: amountRaw });
     }

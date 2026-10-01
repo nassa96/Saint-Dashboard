@@ -319,6 +319,13 @@ class Engine {
     const runBars = () => this.market.refreshBars(300).catch((e) => log.error("MARKET", `bar refresh failed: ${e.message}`));
     runBars();
     this._barsLoop = setInterval(runBars, 5 * 60 * 1000);
+    // DNFH funding-rate epoch recording — real ~1h cadence samples so the
+    // "3 consecutive negative epochs" rebalance trigger reflects elapsed
+    // time, not just whenever someone happens to load the dashboard.
+    // Harmless (read-only) even if hyperliquid isn't configured — just skips.
+    const runDnfhEpoch = () => this.dnfh.recordFundingEpoch().catch((e) => log.error("DNFH", `epoch recording failed: ${e.message}`));
+    runDnfhEpoch();
+    this._dnfhEpochLoop = setInterval(runDnfhEpoch, 60 * 60 * 1000);
     // exchange health on startup
     this.exchanges.healthCheck().catch(() => {});
     // kick an immediate tick
@@ -331,6 +338,7 @@ class Engine {
     clearInterval(this._scanLoop);
     clearInterval(this._macroLoop);
     clearInterval(this._barsLoop);
+    clearInterval(this._dnfhEpochLoop);
     log.info("ENGINE", "Stopped");
   }
 

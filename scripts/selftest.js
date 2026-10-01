@@ -17,6 +17,7 @@ const HyperLiquid = require("../src/exchange/hyperliquid");
 const ExchangeManager = require("../src/exchange/manager");
 const { TronWallet } = require("../src/wallet/tron");
 const DnfhEngine = require("../src/yield/dnfh");
+const dnfhStore = require("../src/yield/dnfhStore");
 const macroFlow = require("../src/intelligence/flow");
 const Engine = require("../src/engine/engine");
 
@@ -296,6 +297,58 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
 
   await assertThrowsAsync(() => dnfh.execute(dnfhPlan, {}), "BLOCKED", "DNFH execute refuses to run without the full live-arm AND on-chain-swap gate");
   ok("DNFH: ranks real funding opportunities honestly, refuses to guess token addresses, hard-caps leverage, and stays fully gated");
+
+  // DNFH refinements: 22% entry threshold, net-edge-after-costs gate,
+  // persisted funding-epoch + delta-drift rebalance triggers
+  const fakeHlVenue2 = {
+    _info: async () => [
+      { universe: [{ name: "HOTCOIN" }, { name: "MEHCOIN" }] },
+      [
+        { funding: "0.0001", markPx: "2.5" }, // 87.6%/yr — clears the default 22% entry bar
+        { funding: "0.00001", markPx: "1.0" }, // 8.76%/yr — positive, but below the entry bar
+      ],
+    ],
+  };
+  const dnfhExchanges2 = { venues: { hyperliquid: fakeHlVenue2 }, placeManualLeveragedOrder: async () => ({}) };
+  const dnfhWallet2 = { swap: async () => ({}), quote: async () => ({}) };
+  const dnfh2 = new DnfhEngine({ exchanges: dnfhExchanges2, wallet: dnfhWallet2, config: { ...dnfhConfig, dnfh: { entryThresholdAnnualPct: 22, minNetEdge7dPct: 0.75 } } });
+
+  const scan2 = await dnfh2.scan();
+  const hot = scan2.opportunities.find((o) => o.symbol === "HOTCOIN");
+  const meh = scan2.opportunities.find((o) => o.symbol === "MEHCOIN");
+  assert(hot.meetsEntryThreshold === true, "scan flags a symbol clearing the 22% entry threshold");
+  assert(meh.meetsEntryThreshold === false, "scan flags a symbol below the 22% entry threshold even though funding is positive");
+
+  await assertThrowsAsync(
+    () => dnfh2.planPosition({ symbol: "MEHCOIN", usdNotional: 100, spotTokenAddress: "0xabc" }),
+    "below the 22% entry threshold",
+    "DNFH refuses to plan a harvest below the configured annualized-funding entry threshold"
+  );
+
+  // Net-edge gate: force it to fail with an unrealistically high basis-slippage override
+  await assertThrowsAsync(
+    () => dnfh2.planPosition({ symbol: "HOTCOIN", usdNotional: 100, spotTokenAddress: "0xabc", costOverrides: { basisSlippagePct: 5 } }),
+    "net edge",
+    "DNFH refuses to plan when projected net edge after costs falls below the ROI gate"
+  );
+
+  const okPlan = await dnfh2.planPosition({ symbol: "HOTCOIN", usdNotional: 100, spotTokenAddress: "0xabc" });
+  assert(okPlan.netEdge.passesGate === true && okPlan.netEdge.netEdgePct > 0.75, "DNFH plans a harvest that clears both the entry threshold and the net-edge gate");
+  ok("DNFH enforces the 22% annualized-funding entry threshold and the 0.75%/7d net-edge-after-costs gate");
+
+  // Rebalance triggers — delta drift and consecutive-negative-funding epochs
+  const rebalSymbol = `TEST-REBAL-${Date.now()}`;
+  dnfhStore.setOpenPosition(rebalSymbol, { spotQty: 10, perpQty: -10, spotEntryNotional: 1000, perpEntryNotional: 1000, spotEntryPx: 100, perpEntryPx: 100 });
+  const driftCheck = dnfh2.checkRebalanceTriggers(rebalSymbol, { spotPx: 100, perpPx: 103 }); // perp notional drifts 3% away from spot
+  assert(driftCheck.shouldRebalance === true && driftCheck.reasons.some((r) => r.includes("delta drift")), "DNFH flags a rebalance when the two legs' notionals drift beyond the configured threshold");
+  const noDriftCheck = dnfh2.checkRebalanceTriggers(rebalSymbol, { spotPx: 100, perpPx: 100.2 });
+  assert(noDriftCheck.shouldRebalance === false, "DNFH does not flag a rebalance when drift stays within the configured threshold and funding hasn't been negative");
+
+  for (let i = 0; i < 3; i++) dnfhStore.recordFundingEpoch(rebalSymbol, -0.001);
+  const negativeEpochCheck = dnfh2.checkRebalanceTriggers(rebalSymbol, { spotPx: 100, perpPx: 100.2 });
+  assert(negativeEpochCheck.shouldRebalance === true && negativeEpochCheck.reasons.some((r) => r.includes("negative")), "DNFH flags a rebalance after 3 consecutive negative funding epochs");
+  dnfhStore.clearOpenPosition(rebalSymbol);
+  ok("DNFH rebalance-trigger check detects both delta-drift and consecutive-negative-funding-epoch conditions");
 
   // paper broker (persistence disabled for isolation)
   const pb = new PaperBroker(config, { persist: false });

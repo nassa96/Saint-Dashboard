@@ -337,6 +337,16 @@ app.get("/api/dnfh/scan", async (req, res) => {
   }
 });
 
+app.get("/api/dnfh/rebalance-check", async (req, res) => {
+  try {
+    const { symbol, spotPx, perpPx } = req.query || {};
+    if (!symbol) throw new Error("symbol is required");
+    res.json(engine.dnfh.checkRebalanceTriggers(symbol, { spotPx: Number(spotPx), perpPx: Number(perpPx) }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.post("/api/dnfh/plan", async (req, res) => {
   try {
     const { symbol, usdNotional, chain, spotTokenAddress, sellToken, leverage } = req.body || {};

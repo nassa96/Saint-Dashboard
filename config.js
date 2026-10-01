@@ -161,6 +161,25 @@ const config = {
     },
   },
 
+  dnfh: {
+    // Funding-arb entry threshold: only plan a harvest when the current
+    // annualized funding yield clears this bar. Below it, the carry isn't
+    // worth the two-leg execution/rebalance overhead — stay in USDC.
+    entryThresholdAnnualPct: num(process.env.DNFH_ENTRY_THRESHOLD_ANNUAL_PCT, 22),
+    // Net-edge gate: projected 7-day ROI (funding yield minus every modeled
+    // cost) must clear this before planning a position.
+    minNetEdge7dPct: num(process.env.DNFH_MIN_NET_EDGE_7D_PCT, 0.75),
+    // Cost model defaults used by the net-edge calculation — these are
+    // estimates, not guarantees; real fills vary by venue/liquidity.
+    openFeePct: num(process.env.DNFH_OPEN_FEE_PCT, 0.02), // post-only maker fee, one-time
+    closeFeePct: num(process.env.DNFH_CLOSE_FEE_PCT, 0.02),
+    basisSlippagePct: num(process.env.DNFH_BASIS_SLIPPAGE_PCT, 0.05), // spot vs perp basis wobble on entry/exit
+    borrowCostAnnualPct: num(process.env.DNFH_BORROW_COST_ANNUAL_PCT, 0), // 0 = fully-funded spot leg, no margin borrow
+    // Rebalance triggers for an open position
+    rebalanceDeltaDriftPct: num(process.env.DNFH_REBALANCE_DELTA_DRIFT_PCT, 1.5),
+    rebalanceNegativeEpochs: num(process.env.DNFH_REBALANCE_NEGATIVE_EPOCHS, 3),
+  },
+
   memecoin: {
     chains: list(process.env.MEMECOIN_CHAINS, ["solana", "base", "ethereum"]),
     minLiquidityUsd: num(process.env.MEMECOIN_MIN_LIQUIDITY_USD, 15000),

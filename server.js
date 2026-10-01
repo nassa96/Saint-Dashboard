@@ -260,6 +260,19 @@ app.post("/api/wallet/quote", async (req, res) => {
   }
 });
 
+// Read-only MEV/sandwich-exposure assessment — safe to call anytime, never moves funds.
+app.post("/api/wallet/assess", async (req, res) => {
+  try {
+    const { chain, tokenAddress, sellToken } = req.body || {};
+    const usd = Number(req.body?.usd || config.wallet.maxSwapUsd);
+    const amountRaw = String(Math.floor(usd * 1e6));
+    const result = await engine.wallet.assessSwap({ chain, tokenAddress, amountRaw, sellToken, usdNotional: usd });
+    res.json({ usd, ...result });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.post("/api/wallet/swap", async (req, res) => {
   try {
     const { chain, tokenAddress, sellToken } = req.body || {};

@@ -9,6 +9,9 @@ const Allocator = require("../src/portfolio/allocator");
 const PaperBroker = require("../src/paper/broker");
 const MemecoinScanner = require("../src/memecoin/scanner");
 const volatilityRadar = require("../src/volatility/predictor");
+const marketMaking = require("../src/signals/strategies/marketMaking");
+const { sortinoRatio } = require("../src/portfolio/sortino");
+const mevDefense = require("../src/wallet/mevDefense");
 const Engine = require("../src/engine/engine");
 
 let passed = 0;
@@ -71,6 +74,56 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(targets["BTC-USD"] > 0, "btc allocated");
   assert(targets["SOL-USD"] === undefined, "short not allocated in spot model");
   ok("allocator rotates capital into strongest longs");
+
+  // Sortino-ratio allocation mode — a smoother (less downside-painful)
+  // series should get more weight than a jagged one at equal conviction score.
+  const smoothUp = Array.from({ length: 60 }, (_, i) => 100 * Math.pow(1.002, i));
+  const jaggedUp = smoothUp.map((v, i) => v * (1 + (i % 2 === 0 ? -0.03 : 0.01)));
+  const sortinoSmooth = sortinoRatio(smoothUp);
+  const sortinoJagged = sortinoRatio(jaggedUp);
+  assert(sortinoSmooth > sortinoJagged, "smoother uptrend scores a higher Sortino ratio than a jagged one");
+  // Use a wide per-position cap + tight portfolio budget so the weighting
+  // math actually determines the split instead of both hitting the same cap.
+  const sortinoConfig = {
+    ...config,
+    capital: { ...config.capital, allocationMethod: "sortino", maxPositionPct: 1, maxPortfolioRiskPct: 0.1 },
+  };
+  const allocSortino = new Allocator(sortinoConfig);
+  const { targets: sortinoTargets } = allocSortino.computeTargets(
+    [
+      { symbol: "SMOOTH", signal: "LONG", confidence: 0.8, score: 0.5 },
+      { symbol: "JAGGED", signal: "LONG", confidence: 0.8, score: 0.5 },
+    ],
+    { seriesBySymbol: { SMOOTH: smoothUp, JAGGED: jaggedUp } }
+  );
+  assert(sortinoTargets["SMOOTH"] > sortinoTargets["JAGGED"], "sortino mode sizes up the smoother ride at equal score");
+  ok("Sortino-ratio allocation mode rewards lower downside risk at equal conviction");
+
+  // Avellaneda-Stoikov (spot-adapted) market-making strategy
+  const flatSeries = Array.from({ length: 80 }, () => 100 + (Math.random() - 0.5) * 0.01);
+  const mmFlat = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 0 });
+  assert(["LONG", "FLAT", "SHORT"].includes(mmFlat.signal), "market-making signal enum");
+  assert(mmFlat.indicators.reservationPrice > 0, "reservation price computed");
+  const mmNoInv = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 0 });
+  const mmFullInv = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 1 });
+  assert(
+    mmFullInv.indicators.reservationPrice <= mmNoInv.indicators.reservationPrice,
+    "full inventory skews reservation price down (lean against existing size)"
+  );
+  ok("Avellaneda-Stoikov market-making strategy computes inventory-aware reservation price + spread");
+
+  // MEV defense — read-only risk assessment + execution planning, no network calls
+  const lowImpactQuote = { priceImpactPct: 0.002 };
+  const highImpactQuote = { priceImpactPct: 0.045 };
+  const lowRisk = mevDefense.assessRisk(lowImpactQuote, 100, {});
+  const highRisk = mevDefense.assessRisk(highImpactQuote, 1000, {});
+  assert(lowRisk.level === "MINIMAL" || lowRisk.level === "LOW", "low price-impact reads low sandwich risk");
+  assert(highRisk.level === "HIGH", "high price-impact reads high sandwich risk");
+  const plan = mevDefense.planExecution(1000, highRisk, { splitThresholdUsd: 250, maxChunks: 4 });
+  assert(plan.chunks > 1, "large + high-risk swap gets tranched");
+  const noSplitPlan = mevDefense.planExecution(50, lowRisk, { splitThresholdUsd: 250, maxChunks: 4 });
+  assert(noSplitPlan.chunks === 1, "small + low-risk swap stays single-shot");
+  ok("MEV defense assesses sandwich exposure from quote data + plans tranched execution");
 
   // paper broker (persistence disabled for isolation)
   const pb = new PaperBroker(config, { persist: false });

@@ -78,6 +78,11 @@ const config = {
     // Fee-aware floor: never place a trade smaller than this many USD.
     // Tiny trades get devoured by fees + exchange minimums. Default $10.
     minTradeUsd: num(process.env.MIN_TRADE_USD, 10),
+    // "score" (default, conviction-weighted rotation) | "sortino" (blends
+    // conviction with each candidate's trailing Sortino ratio, so a long
+    // that's had a smoother, less-painful ride gets sized up relative to
+    // one with the same score but nastier downside history).
+    allocationMethod: (process.env.ALLOCATION_METHOD || "score").toLowerCase(),
   },
 
   universe: list(process.env.TRADE_UNIVERSE, [
@@ -152,6 +157,19 @@ const config = {
       chain: (process.env.EVM_CHAIN || "base").toLowerCase(),
       rpc: process.env.EVM_RPC || "",
       zeroxApiKey: process.env.ZEROX_API_KEY || "",
+    },
+    // MEV defense (protects YOUR swaps from being sandwiched — see
+    // src/wallet/mevDefense.js). All optional; safe no-op defaults.
+    mev: {
+      splitThresholdUsd: num(process.env.MEV_SPLIT_THRESHOLD_USD, 250),
+      maxChunks: num(process.env.MEV_MAX_CHUNKS, 4),
+      minChunkUsd: num(process.env.MEV_MIN_CHUNK_USD, 25),
+      chunkDelayMs: num(process.env.MEV_CHUNK_DELAY_MS, 4000),
+      alwaysProtect: bool(process.env.MEV_ALWAYS_PROTECT, false),
+      // Flashbots Protect RPC — Ethereum mainnet only today. Routing a tx
+      // here keeps it out of the public mempool (no free lunch: only
+      // meaningful on chains with a real protect-relay ecosystem).
+      protectedRelayUrl: process.env.EVM_PROTECT_RPC || "",
     },
   },
 };

@@ -94,12 +94,22 @@ class Engine {
     await this.market.refresh();
     const prices = this.prices();
 
+    // Pre-compute equity/exposure BEFORE evaluating signals so inventory-aware
+    // strategies (e.g. Avellaneda-Stoikov market making) can see "how much of
+    // this symbol am I already holding" and skew their reservation price
+    // accordingly, instead of blindly chasing the raw signal score.
+    const preEquity = this.paper.equity(prices) || this.config.capital.startingEquity;
+
     // 1) Evaluate every symbol with its ROUTED strategy (per-symbol/per-strategy)
     const evaluations = this.config.universe.map((symbol) => {
       const series = this.market.getPrices(symbol);
       const stratName = this.config.resolveStrategy(symbol);
-      const evalResult = strategy.evaluate(series, { strategy: stratName });
-      return { symbol, price: prices[symbol]?.price || null, strategy: stratName, ...evalResult };
+      const price = prices[symbol]?.price || null;
+      const currentNotional = price ? this.paper.symbolExposure(symbol, price) : 0;
+      const maxNotional = preEquity * this.config.capital.maxPositionPct;
+      const inventoryRatio = maxNotional > 0 ? Math.max(0, Math.min(1, currentNotional / maxNotional)) : 0;
+      const evalResult = strategy.evaluate(series, { strategy: stratName, context: { inventoryRatio } });
+      return { symbol, price, strategy: stratName, ...evalResult };
     });
     this.lastEvaluations = evaluations;
 
@@ -117,8 +127,9 @@ class Engine {
       }
     }
 
-    // 2) Portfolio rotation targets
-    const { targets, ranked } = this.allocator.computeTargets(evaluations);
+    // 2) Portfolio rotation targets (Sortino mode reuses the same
+    // per-symbol series the volatility radar just computed).
+    const { targets, ranked } = this.allocator.computeTargets(evaluations, { seriesBySymbol });
     this.lastTargets = targets;
 
     // 3) Risk + rebalance toward targets

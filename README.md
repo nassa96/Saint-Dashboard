@@ -39,6 +39,9 @@ v2 replaces that core with real, working machinery:
 | Journal & analytics | none | Closed-trade journal + analytics page: win rate, profit factor, expectancy, drawdown, PnL distribution (`src/analytics`, `/analytics.html`) |
 | CI | none | GitHub Actions: self-test on Node 18/20/22 + boot smoke test (`ci/`, see `ci/README.md`) |
 | Volatility forecasting | none | **Extreme Volatility Radar** — real EWMA/realized-vol regime detection, Bollinger-squeeze compression flags, and an empirical (percentile-based) "extreme-move likelihood" score per symbol (`src/volatility/predictor.js`, `/api/volatility`, dashboard panel) |
+| Market making | none | **Avellaneda-Stoikov (spot-adapted)** strategy — inventory-aware reservation price + optimal spread from real EWMA vol, skews away from your own existing position instead of blindly chasing score (`src/signals/strategies/marketMaking.js`) |
+| Allocation | conviction-score only | Optional **Sortino-ratio allocation mode** — blends conviction with each candidate's trailing risk-adjusted (downside-only) return, so a smoother ride gets sized up over a jagged one at equal score (`src/portfolio/sortino.js`, `ALLOCATION_METHOD=sortino`) |
+| On-chain swap safety | slippage cap only | **MEV defense** — reads the aggregator's own price-impact figure to flag sandwich-attack exposure, tranches large/high-risk swaps into smaller delayed chunks, and can route through a protected relay when configured (`src/wallet/mevDefense.js`, `/api/wallet/assess`, read-only, never touches anyone else's transactions) |
 
 ### Extreme Volatility Radar (honest read)
 No system — ours included — can predict volatility with certainty; markets are
@@ -59,6 +62,23 @@ with real math and no randomness:
 Every response carries a `disclaimer` field and the same honesty rule as the
 rest of this repo: it's a statistical estimate from real price history, never
 a guarantee, and never financial advice. See `SAFETY.md`.
+
+### MEV defense (not a sandwich tool)
+`src/wallet/mevDefense.js` protects *your own* on-chain swaps — it never
+inspects or acts on anyone else's transactions. It reads the price-impact
+number Jupiter/0x already return for your quote, flags sandwich-attack
+exposure (MINIMAL/LOW/MEDIUM/HIGH), and — only when risk is real and the
+notional is large — splits the swap into smaller delayed tranches instead of
+broadcasting one easy-to-spot transaction. Call `/api/wallet/assess`
+(read-only, no funds move) to see the assessment before arming anything.
+
+### Pluggable strategy slots awaiting your spec
+Three strategy names were referenced without rules attached: `dnfh`,
+`overlord`, and `autonomouswealth`. Each is registered in
+`src/signals/strategies/placeholders.js` as a real, selectable strategy that
+always returns `FLAT` with a pointer to its spec template in
+`docs/strategies/`. Fill in the template (entry/exit rules, timeframe,
+sizing, risk limits) and they'll be implemented with real logic + tests.
 
 ### LIVE vs SIM labeling
 Every price, signal, and candidate is tagged **`LIVE`** or **`SIM`**. If the host

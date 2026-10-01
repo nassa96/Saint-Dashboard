@@ -16,6 +16,7 @@ const PaperBroker = require("../paper/broker");
 const MemecoinScanner = require("../memecoin/scanner");
 const ExchangeManager = require("../exchange/manager");
 const WalletManager = require("../wallet/manager");
+const DnfhEngine = require("../yield/dnfh");
 const Notifier = require("../alerts/notifier");
 const log = require("../util/logger");
 
@@ -31,6 +32,9 @@ class Engine {
     this.scanner = new MemecoinScanner(config);
     this.exchanges = new ExchangeManager(config);
     this.wallet = new WalletManager(config);
+    // Delta-neutral funding harvest: manual, cross-venue (Base spot +
+    // HyperLiquid perp short), never called by the auto-rotation loop.
+    this.dnfh = new DnfhEngine({ exchanges: this.exchanges, wallet: this.wallet, config });
     this.notifier = new Notifier(config);
 
     // Activate the configured signal strategy (momentum | meanreversion | ensemble)

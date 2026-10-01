@@ -15,6 +15,7 @@ const mevDefense = require("../src/wallet/mevDefense");
 const HyperLiquid = require("../src/exchange/hyperliquid");
 const ExchangeManager = require("../src/exchange/manager");
 const { TronWallet } = require("../src/wallet/tron");
+const DnfhEngine = require("../src/yield/dnfh");
 const Engine = require("../src/engine/engine");
 
 let passed = 0;
@@ -156,6 +157,44 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   await assertThrowsAsync(() => tron.quote(), "no vetted", "tron refuses to quote without a vetted aggregator configured");
   await assertThrowsAsync(() => tron.swap(), "BLOCKED", "tron refuses to swap without a vetted aggregator configured");
   ok("Tron connector refuses swaps honestly instead of routing funds through an unverified relay");
+
+  // DNFH — delta-neutral funding harvest: real cross-venue yield strategy.
+  // Isolated fakes so this doesn't touch global live-arm state.
+  const fakeHlVenue = {
+    _info: async ({ type }) => {
+      assert(type === "metaAndAssetCtxs", "DNFH scan requests the right hyperliquid info type");
+      return [
+        { universe: [{ name: "VIRTUAL" }, { name: "PENGU" }, { name: "BTC" }] },
+        [
+          { funding: "0.0001", markPx: "2.5" }, // positive, highest -> should rank first
+          { funding: "-0.00005", markPx: "0.04" }, // negative -> filtered out (not supported)
+          { funding: "0.00002", markPx: "90000" }, // positive, lower -> should rank second
+        ],
+      ];
+    },
+  };
+  const dnfhConfig = { exchanges: { hyperliquid: { maxLeverage: 2 } }, canTradeLive: () => false, canSwapOnchain: () => false };
+  const dnfhExchanges = {
+    venues: { hyperliquid: fakeHlVenue },
+    placeManualLeveragedOrder: async () => { throw new Error("perp leg should never be called while disarmed"); },
+  };
+  const dnfhWallet = { swap: async () => { throw new Error("spot leg should never be called while disarmed"); }, quote: async () => ({}) };
+  const dnfh = new DnfhEngine({ exchanges: dnfhExchanges, wallet: dnfhWallet, config: dnfhConfig });
+
+  const scanResult = await dnfh.scan();
+  assert(scanResult.opportunities.length === 2, "DNFH scan keeps only positive-funding symbols (negative funding isn't supported, not guessed at)");
+  assert(scanResult.opportunities[0].symbol === "VIRTUAL", "DNFH scan ranks opportunities by annualized funding, descending");
+  assert(Math.abs(scanResult.opportunities[0].annualizedFundingPct - 0.0001 * 24 * 365 * 100) < 1e-6, "DNFH annualizes hourly funding correctly");
+
+  await assertThrowsAsync(() => dnfh.planPosition({ symbol: "VIRTUAL", usdNotional: 100 }), "spotTokenAddress is required", "DNFH refuses to plan without a caller-verified spot token address — it will not guess a contract address");
+  await assertThrowsAsync(() => dnfh.planPosition({ symbol: "PENGU", usdNotional: 100, spotTokenAddress: "0xabc" }), "no positive funding", "DNFH refuses to harvest a symbol that isn't paying positive funding right now");
+
+  const dnfhPlan = await dnfh.planPosition({ symbol: "VIRTUAL", usdNotional: 100, spotTokenAddress: "0xabc", leverage: 10 });
+  assert(dnfhPlan.leverage === 2, "DNFH hard-caps leverage to config max regardless of what's requested");
+  assert(dnfhPlan.legs.spot.usdNotional === 100 && dnfhPlan.legs.perp.usdNotional === 200, "DNFH sizes the perp short to leverage × spot notional, keeping the plan delta-neutral");
+
+  await assertThrowsAsync(() => dnfh.execute(dnfhPlan, {}), "BLOCKED", "DNFH execute refuses to run without the full live-arm AND on-chain-swap gate");
+  ok("DNFH: ranks real funding opportunities honestly, refuses to guess token addresses, hard-caps leverage, and stays fully gated");
 
   // paper broker (persistence disabled for isolation)
   const pb = new PaperBroker(config, { persist: false });

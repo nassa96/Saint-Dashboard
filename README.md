@@ -44,6 +44,7 @@ v2 replaces that core with real, working machinery:
 | On-chain swap safety | slippage cap only | **MEV defense** — reads the aggregator's own price-impact figure to flag sandwich-attack exposure, tranches large/high-risk swaps into smaller delayed chunks, and can route through a protected relay when configured (`src/wallet/mevDefense.js`, `/api/wallet/assess`, read-only, never touches anyone else's transactions) |
 | Venues | Coinbase, Binance.US, Kraken, Solana, EVM (ETH/Base/BNB) | + **HyperLiquid** (perps, monitor-only — reads need just a public address, never auto-traded by the rotation loop) and **Tron** (balance reads via public TronGrid API; swaps intentionally disabled until a vetted aggregator is configured, see `docs/TRON_SWAP.md`) |
 | Wallet connect | server-side `.env` keys only | + **browser injected-wallet connect** (MetaMask / Coinbase Wallet / Trust Wallet / Phantom) on `/connect.html` — asks for the **public address only**, never a signature or key; pairs with a fully read-only `/api/wallet/lookup` for balance display |
+| Yield strategies | none | + **DNFH (delta-neutral funding harvest)** — real long-spot(Base)/short-perp(HyperLiquid) funding-rate capture, net exposure ~0. Manual/gated only (`GET /api/dnfh/scan`, `POST /api/dnfh/plan`, `POST /api/dnfh/execute`), hard-capped leverage, never guesses a token contract address, never auto-unwinds a partial fill silently — see `VENUES.md` |
 
 ### Extreme Volatility Radar (honest read)
 No system — ours included — can predict volatility with certainty; markets are

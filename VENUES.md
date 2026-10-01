@@ -43,6 +43,28 @@ no officially-documented, no-middleman-commission Tron DEX aggregator API
 was available to wire up responsibly at build time. See `docs/TRON_SWAP.md`
 for exactly what's needed to turn them on once you've picked a provider you trust.
 
+### DNFH — Delta-Neutral Funding Harvest (manual, cross-venue, hard-capped)
+A real strategy, not an auto-traded one: hold **spot LONG on Base** and an
+equal-notional **perp SHORT on HyperLiquid** at the same time, so net price
+exposure is ~0 — you collect the funding payment perp longs pay shorts
+whenever funding is positive, independent of which way price moves.
+- `GET /api/dnfh/scan` — read-only, ranks live HyperLiquid funding rates by
+  annualized yield. Only positive-funding symbols are "harvestable"; this
+  module does not support short-spot, so negative-funding symbols are
+  filtered out rather than guessed at.
+- `POST /api/dnfh/plan` — pure math, no funds move. **You must supply the
+  exact spot token contract address yourself** (verified against the
+  project's own docs or a verified block-explorer entry) — this module will
+  never guess a contract address for you; getting that wrong with real
+  money means buying the wrong asset.
+- `POST /api/dnfh/execute` — moves real funds on both legs. Requires the
+  full live-arm gate **and** `ONCHAIN_TRADING_ENABLED=true`. Leverage is
+  hard-capped at `HYPERLIQUID_MAX_LEVERAGE` (default 2x) — this is a yield
+  tool, not a place to stack directional risk. If the perp leg fails after
+  the spot leg already filled, it does **not** silently auto-unwind (that's
+  itself a real trade) — it returns a loud partial-fill warning so a human
+  decides the next move.
+
 ### Easiest way to connect: the Connections page
 Open **`/connect.html`** (🔌 Connect in the dashboard header). For each venue you get
 a status badge (keys saved? reachable?), the fee schedule, and a form to paste your

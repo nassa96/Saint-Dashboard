@@ -323,6 +323,40 @@ app.post("/api/wallet/swap", async (req, res) => {
   }
 });
 
+// DNFH (delta-neutral funding harvest): HyperLiquid long-spot/short-perp
+// funding capture. Manual/cross-venue by design — never part of the
+// auto-rotation loop. scan() is fully read-only; plan() is pure math; only
+// execute() moves real funds, and only once both the live-arm AND the
+// on-chain-swap arm are active.
+app.get("/api/dnfh/scan", async (req, res) => {
+  try {
+    const minAnnualPct = Number(req.query?.minAnnualPct || 0);
+    res.json(await engine.dnfh.scan({ minAnnualPct }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/dnfh/plan", async (req, res) => {
+  try {
+    const { symbol, usdNotional, chain, spotTokenAddress, sellToken, leverage } = req.body || {};
+    const plan = await engine.dnfh.planPosition({ symbol, usdNotional, chain, spotTokenAddress, sellToken, leverage });
+    res.json(plan);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/dnfh/execute", async (req, res) => {
+  try {
+    const { plan, spotAmountRaw, perpQuantity, perpLimitPrice } = req.body || {};
+    const result = await engine.dnfh.execute(plan, { spotAmountRaw, perpQuantity, perpLimitPrice });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Alerts: status + send a test message through configured channels
 app.get("/api/alerts/status", (req, res) => res.json(engine.notifier.status()));
 app.post("/api/alerts/test", async (req, res) => {

@@ -143,6 +143,9 @@ const config = {
     hyperliquid: {
       walletAddress: process.env.HYPERLIQUID_WALLET_ADDRESS || "",
       privateKey: process.env.HYPERLIQUID_API_PRIVATE_KEY || "",
+      // DNFH (delta-neutral funding harvest) is a yield strategy, not a
+      // directional leverage play — hard-capped low on purpose.
+      maxLeverage: num(process.env.HYPERLIQUID_MAX_LEVERAGE, 2),
     },
   },
 

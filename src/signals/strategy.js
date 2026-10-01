@@ -43,7 +43,7 @@ function activeParams() {
 /**
  * Evaluate a price series.
  * @param {number[]} prices oldest -> newest closes
- * @param {object} opts { strategy?, params?, members? }
+ * @param {object} opts { strategy?, params?, members?, context? }
  */
 function evaluate(prices, opts = {}) {
   const name = (opts.strategy || _defaultStrategy || "momentum").toLowerCase();
@@ -51,14 +51,16 @@ function evaluate(prices, opts = {}) {
     return registry.ensemble(prices, {
       members: opts.members || _ensembleMembers,
       params: opts.paramsByStrategy || _paramsByStrategy,
+      context: opts.context || {},
     });
   }
   const strat = registry.get(name);
   if (!strat) return { signal: "FLAT", confidence: 0, score: 0, reasons: [`unknown strategy ${name}`], indicators: {} };
   // explicit params win, else optimizer-saved params, else strategy defaults
   const params = opts.params || _paramsByStrategy[name] || undefined;
-  return strat.evaluate(prices, params);
+  return strat.evaluate(prices, params, opts.context || {});
 }
+
 
 module.exports = {
   evaluate,

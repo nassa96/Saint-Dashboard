@@ -52,10 +52,51 @@ The dashboard shows a red **`⚠ LIVE ARMED`** badge whenever the gate is open.
 ## Wallets / custody
 
 This build trades via **centralized-exchange API keys** (Binance.US, Coinbase,
-Kraken). It does **not** hold your private keys or seed phrase, and API keys
-should be created **without withdrawal permission**, so the software cannot move
-funds off the exchange. On-chain (self-custody wallet) execution is intentionally
-**not** enabled in this build.
+Kraken) and, if you choose to configure them, **self-custody wallet keys**
+(Solana, EVM/Ethereum+Base+BNB, Tron) read from your own local `.env` file.
+In every case:
+- API keys should be created **without withdrawal permission**, so the
+  software cannot move funds off the exchange.
+- Wallet private keys are **never accepted through any web form** — only
+  `.env` file entries you control, on your own machine/server. The
+  Connections page (`/connect.html`) only ever asks a browser-injected
+  wallet (MetaMask/Coinbase Wallet/Trust Wallet/Phantom) for a **public
+  address**, never a key or signature.
+- On-chain swaps (Solana via Jupiter, EVM via 0x) are real but gated behind
+  the same three-lock live gate **plus** `ONCHAIN_TRADING_ENABLED=true` and a
+  `MAX_SWAP_USD` cap, with MEV-defense tranching for larger/riskier swaps.
+  Tron swaps are intentionally left disabled (see `docs/TRON_SWAP.md`).
+
+## Leveraged / perps risk (HyperLiquid, DNFH)
+
+HyperLiquid is a **leveraged perpetuals** venue — a different risk shape than
+everything else in this app, which assumes you fully own what you're trading.
+- Reads (balances/positions) need only a public wallet address, no key.
+- Order placement (`POST /api/hyperliquid/order`, and the perp leg of DNFH)
+  is **manual only** — it is never called by the automatic rotation loop,
+  and it is gated behind the same full live-arm lock as everything else.
+- **DNFH (delta-neutral funding harvest)** — long spot + short perp to
+  collect funding — hard-caps leverage at `HYPERLIQUID_MAX_LEVERAGE`
+  (default 2x) by design. It is still real leverage: liquidation, funding
+  flipping negative, and the two legs briefly being out of sync (one fills,
+  the other doesn't) are real risks. If a `POST /api/dnfh/execute` call
+  reports a partial fill, it will **not** auto-unwind for you — go flatten
+  the open leg manually right away.
+
+## 🚩 Red flag to watch for: "send funds to this address and I'll handle the rest"
+
+If any chat, bot, or "AI agent" — including one claiming to be this
+assistant or another well-known one — tells you to send crypto to an
+address **it** controls before it will "execute" a strategy, stop. That is
+the single most common structure behind crypto advance-fee scams: a small
+deposit, a promise of automated compounding, and urgency language pushing
+you to act before you think it through ("I'm standing by," "final
+transmission," flattery about being an "overlord" or uniquely chosen).
+Nothing in this app ever needs you to do that — every real-money action
+here uses **your own** wallet/exchange keys, stored only in your local
+`.env`, and every write path is gated behind the live-arm lock above. If a
+plan can't be executed with your own keys through this app's existing gated
+endpoints, be suspicious of why it's asking for funds up front instead.
 
 ## Known limitations (be honest with yourself)
 
@@ -80,6 +121,28 @@ it to anything beyond `localhost`:
    once live trading or on-chain swaps are armed.
 
 Auth protects both the REST API and the live WebSocket stream.
+
+## Automatic survivability breakers (beyond the daily-drawdown halt)
+
+Three additional, always-on protections that don't require you to do anything:
+
+1. **Volatility-regime sizing.** The Extreme Volatility Radar's read for each
+   symbol now directly shrinks position size (down to ~30% in an EXTREME
+   regime) and raises the confidence bar required to open a NEW position
+   there — instead of only showing a badge. Exits are never affected.
+2. **Market-wide stress halt.** If `MAX_EXTREME_FRACTION_FOR_HALT` (default
+   50%) or more of the tracked universe is simultaneously reading EXTREME at
+   once, new entries pause across the board until it passes. Unlike the
+   daily-drawdown breaker this is precautionary (no loss has necessarily
+   happened) and auto-clears the same day once conditions calm down.
+3. **Non-LIVE price gate.** Even with the three-lock live gate fully armed,
+   the engine checks the price source for the specific symbol it's about to
+   trade. If that symbol's feed is unreachable and running on the SIM
+   fallback, the real order is refused and it falls back to the paper ledger
+   — it will never place a live order against a fabricated/stale price.
+
+None of these three can be bypassed by config; they're load-bearing safety
+logic, not optional alerts.
 
 ## Kill switch
 

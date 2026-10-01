@@ -106,6 +106,18 @@ class Notifier {
     }
   }
 
+  notifyVolatility(symbol, v) {
+    if (!this.enabled) return;
+    const txt =
+      `⚡ *Extreme volatility regime: ${symbol}*\n` +
+      `Percentile: ${v.percentile}th · z-score: ${v.zScore}\n` +
+      `EWMA vol: ${v.ewmaVolPct}% · 1σ move: ${v.expectedMove?.oneSigmaPct}% · 2σ: ${v.expectedMove?.twoSigmaPct}%\n` +
+      (v.squeeze ? `Squeeze detected (width pct ${v.squeezeWidthPercentile})\n` : "") +
+      `${v.reasons.join("; ")}\n` +
+      `_Statistical estimate, not a guarantee — see SAFETY.md_`;
+    this.send(txt).catch(() => {});
+  }
+
   status() {
     return {
       enabled: this.enabled,

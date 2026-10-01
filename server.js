@@ -13,6 +13,7 @@ const { WebSocketServer } = require("ws");
 const config = require("./config");
 const Engine = require("./src/engine/engine");
 const Backtester = require("./src/backtest/backtester");
+const SyntheticValidator = require("./src/backtest/syntheticValidator");
 const Optimizer = require("./src/backtest/optimizer");
 const { buildSeries } = require("./src/backtest/history");
 const analytics = require("./src/analytics/analytics");
@@ -82,8 +83,21 @@ app.post("/api/tick", async (req, res) => {
 });
 
 app.get("/api/signals", (req, res) => res.json(engine.snapshot().signals));
+app.get("/api/volatility", (req, res) => res.json(engine.lastVolatility || {}));
 app.get("/api/portfolio", (req, res) => res.json(engine.paper.snapshot(engine.prices())));
 app.get("/api/memecoins", (req, res) => res.json(engine.scanner.snapshot()));
+app.get("/api/capital-ring", (req, res) =>
+  res.json({
+    enabled: engine.capitalRing.enabled,
+    shieldPct: engine.capitalRing.shieldPct,
+    spearPct: engine.capitalRing.spearPct,
+    spearStrategies: engine.capitalRing.spearStrategies,
+    spearHalted: engine.capitalRing.spearHalted,
+    spearHaltUntil: engine.capitalRing.spearHaltUntil ? new Date(engine.capitalRing.spearHaltUntil).toISOString() : null,
+    lastPools: engine.lastPools || null,
+    lastSpearRisk: engine.lastSpearRisk || null,
+  })
+);
 app.get("/api/chronicle", (req, res) => res.json(engine.chronicle.slice(-50).reverse()));
 
 // Exchange connectivity (read-only)
@@ -129,6 +143,24 @@ app.post("/api/exchanges/disconnect", (req, res) => {
     const venue = (req.body?.venue || "").toLowerCase();
     if (!venue) return res.status(400).json({ error: "venue is required" });
     res.json(engine.exchanges.disconnect(venue));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// HyperLiquid — monitor-only by default (reads need just a public address).
+// Manual leveraged order placement is a SEPARATE, explicitly-invoked action,
+// never called by the automatic rotation loop. Still requires full live-arm.
+app.post("/api/hyperliquid/order", async (req, res) => {
+  try {
+    const { symbol, side, quantity, limitPrice, reduceOnly } = req.body || {};
+    if (!symbol || !side || !quantity || !limitPrice) {
+      return res.status(400).json({ error: "symbol, side, quantity, limitPrice are required" });
+    }
+    const result = await engine.exchanges.placeManualLeveragedOrder({
+      symbol, side, quantity, limitPrice, reduceOnly,
+    });
+    res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -184,6 +216,30 @@ app.post("/api/backtest", async (req, res) => {
   }
 });
 app.get("/api/backtest/last", (req, res) => res.json(_btCache || { note: "no backtest run yet" }));
+
+// Stage 2 cold-start gate: block-bootstrap synthetic path validation.
+// Runs are capped here for HTTP responsiveness — the underlying module
+// defaults to the full spec'd 10,000 runs when called directly/offline;
+// this endpoint trades that down for a request that actually returns.
+app.post("/api/validate/synthetic", async (req, res) => {
+  try {
+    const bars = Math.min(1000, Math.max(80, Number(req.body?.bars || 400)));
+    const gran = Number(req.body?.granularity || 3600);
+    const runs = Math.min(2000, Math.max(20, Number(req.body?.runs || 200)));
+    const { series } = await buildSeries(config.universe, bars, gran);
+    const validator = new SyntheticValidator(config);
+    const result = validator.validate(series, {
+      runs,
+      blockSize: Number(req.body?.blockSize || 10),
+      sortinoThreshold: Number(req.body?.sortinoThreshold || 1.8),
+      passRateThreshold: Number(req.body?.passRateThreshold || 0.95),
+      strategy: req.body?.strategy,
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 
 // List available strategies
 app.get("/api/strategies", (req, res) => {
@@ -247,6 +303,20 @@ app.post("/api/walkforward", async (req, res) => {
 // On-chain wallet: status, read-only quote, and gated swap
 app.get("/api/wallet/status", (req, res) => res.json(engine.wallet.status()));
 
+// Fully read-only balance lookup for ANY public address — no key, no
+// signature, no approval. Pairs with the browser wallet-connect button
+// (MetaMask/Coinbase Wallet/Trust Wallet/Phantom) which only ever asks for
+// the public address, never a signature, until an explicit swap happens.
+const addressLookup = require("./src/wallet/addressLookup");
+app.post("/api/wallet/lookup", async (req, res) => {
+  try {
+    const { chain, address } = req.body || {};
+    res.json(await addressLookup.lookup(chain, address, { config }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.post("/api/wallet/quote", async (req, res) => {
   try {
     const { chain, tokenAddress, sellToken } = req.body || {};
@@ -254,6 +324,19 @@ app.post("/api/wallet/quote", async (req, res) => {
     const amountRaw = String(Math.floor(usd * 1e6)); // USDC has 6 decimals
     const q = await engine.wallet.quote({ chain, tokenAddress, amountRaw, sellToken });
     res.json({ usd, ...q });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Read-only MEV/sandwich-exposure assessment — safe to call anytime, never moves funds.
+app.post("/api/wallet/assess", async (req, res) => {
+  try {
+    const { chain, tokenAddress, sellToken } = req.body || {};
+    const usd = Number(req.body?.usd || config.wallet.maxSwapUsd);
+    const amountRaw = String(Math.floor(usd * 1e6));
+    const result = await engine.wallet.assessSwap({ chain, tokenAddress, amountRaw, sellToken, usdNotional: usd });
+    res.json({ usd, ...result });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -272,6 +355,116 @@ app.post("/api/wallet/swap", async (req, res) => {
       usdNotional: usd,
     });
     res.json({ ok: true, usd, ...result });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// DNFH (delta-neutral funding harvest): HyperLiquid long-spot/short-perp
+// funding capture. Manual/cross-venue by design — never part of the
+// auto-rotation loop. scan() is fully read-only; plan() is pure math; only
+// execute() moves real funds, and only once both the live-arm AND the
+// on-chain-swap arm are active.
+app.get("/api/dnfh/scan", async (req, res) => {
+  try {
+    const minAnnualPct = Number(req.query?.minAnnualPct || 0);
+    res.json(await engine.dnfh.scan({ minAnnualPct }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get("/api/avss/scan", async (req, res) => {
+  try {
+    res.json(await engine.avss.scan());
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Order Flow Imbalance (OFI) — polls a fresh Coinbase L2 book snapshot for
+// the symbol, keeps it alongside the previous poll, and computes the
+// multi-level imbalance between the two. See MarketData.refreshOrderBooks
+// + src/signals/orderFlow.js for the honest "slow REST poll, not a
+// continuous WS tensor" scope note.
+app.get("/api/market/orderflow", async (req, res) => {
+  try {
+    const symbol = req.query?.symbol;
+    if (!symbol || !engine.config.universe.includes(symbol)) {
+      throw new Error(`symbol is required and must be one of the configured universe: ${engine.config.universe.join(", ")}`);
+    }
+    const levels = Math.min(Number(req.query?.levels) || 10, 25);
+    await engine.market.refreshOrderBooks(levels);
+    const { ofiFromMarket } = require("./src/signals/orderFlow");
+    const ofi = ofiFromMarket(engine.market, symbol, levels);
+    res.json({
+      symbol,
+      snapshots: engine.market.getOrderBookSnapshots(symbol).length,
+      ofi,
+      note: ofi ? undefined : "need at least 2 polls to compute an OFI delta — call again shortly",
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Kalman-filter pairs cointegration — time-varying hedge ratio + spread
+// z-score between two symbols already tracked in this app's price history
+// (no new data feed required). See src/signals/kalmanPairs.js.
+app.get("/api/signals/kalman-pairs", async (req, res) => {
+  try {
+    const { x, y } = req.query || {};
+    if (!x || !y) throw new Error("query params x and y (symbols) are required, e.g. ?x=BTC-USD&y=ETH-USD");
+    const xSeries = (engine.market.history[x] || []).map((h) => h.price);
+    const ySeries = (engine.market.history[y] || []).map((h) => h.price);
+    if (!xSeries.length || !ySeries.length) throw new Error(`no tracked price history yet for ${x} and/or ${y} — run a few engine ticks first`);
+    const { kalmanPairSignal } = require("./src/signals/kalmanPairs");
+    const opts = {};
+    if (req.query?.zWindow) opts.zWindow = Number(req.query.zWindow);
+    if (req.query?.zEntryThreshold) opts.zEntryThreshold = Number(req.query.zEntryThreshold);
+    res.json({ x, y, ...kalmanPairSignal(xSeries, ySeries, opts) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get("/api/dnfh/rebalance-check", async (req, res) => {
+  try {
+    const { symbol, spotPx, perpPx } = req.query || {};
+    if (!symbol) throw new Error("symbol is required");
+    res.json(engine.dnfh.checkRebalanceTriggers(symbol, { spotPx: Number(spotPx), perpPx: Number(perpPx) }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/dnfh/plan", async (req, res) => {
+  try {
+    const { symbol, usdNotional, chain, spotTokenAddress, sellToken, leverage } = req.body || {};
+    const plan = await engine.dnfh.planPosition({ symbol, usdNotional, chain, spotTokenAddress, sellToken, leverage });
+    res.json(plan);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/dnfh/execute", async (req, res) => {
+  try {
+    const { plan, spotAmountRaw, perpQuantity, perpLimitPrice } = req.body || {};
+    const result = await engine.dnfh.execute(plan, { spotAmountRaw, perpQuantity, perpLimitPrice });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Macro risk-appetite overlay (Fear & Greed + global market-cap trend) —
+// fully read-only, cached. Used internally to throttle (never boost)
+// deployed capital; exposed here too so the dashboard can show it.
+const macroFlow = require("./src/intelligence/flow");
+app.get("/api/intelligence/flow", async (req, res) => {
+  try {
+    res.json(await macroFlow.getFlow({ forceRefresh: req.query?.refresh === "1" }));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

@@ -6,12 +6,35 @@ const ind = require("../src/signals/indicators");
 const strategy = require("../src/signals/strategy");
 const RiskManager = require("../src/risk/riskManager");
 const Allocator = require("../src/portfolio/allocator");
+const CapitalRing = require("../src/portfolio/capitalRing");
 const PaperBroker = require("../src/paper/broker");
 const MemecoinScanner = require("../src/memecoin/scanner");
+const volatilityRadar = require("../src/volatility/predictor");
+const marketMaking = require("../src/signals/strategies/marketMaking");
+const fibonacci = require("../src/signals/strategies/fibonacci");
+const { sortinoRatio, downsideDeviation, sortinoScalar, kellyFraction, kellySortinoFraction } = require("../src/portfolio/sortino");
+const mevDefense = require("../src/wallet/mevDefense");
+const HyperLiquid = require("../src/exchange/hyperliquid");
+const ExchangeManager = require("../src/exchange/manager");
+const { TronWallet } = require("../src/wallet/tron");
+const DnfhEngine = require("../src/yield/dnfh");
+const AvssScanner = require("../src/signals/avss");
+const dnfhStore = require("../src/yield/dnfhStore");
+const macroFlow = require("../src/intelligence/flow");
 const Engine = require("../src/engine/engine");
+const SyntheticValidator = require("../src/backtest/syntheticValidator");
 
 let passed = 0;
 const ok = (name) => { console.log("  ✓", name); passed++; };
+async function assertThrowsAsync(fn, expectedSubstring, message) {
+  try {
+    await fn();
+  } catch (e) {
+    assert(e.message.includes(expectedSubstring), `${message} (got: ${e.message})`);
+    return;
+  }
+  assert.fail(`${message} — expected a throw containing "${expectedSubstring}"`);
+}
 
 (async () => {
   // indicators
@@ -22,6 +45,44 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(ind.momentum(rising, 10) > 0, "momentum positive");
   assert(ind.volatility(rising, 20) != null, "volatility");
   ok("indicators compute correctly");
+
+  // OHLCV-dependent indicators: ATR, stochastic, swing range, Fibonacci levels
+  const upBars = Array.from({ length: 60 }, (_, i) => {
+    const base = 100 + i * 0.6;
+    return { ts: i, open: base - 0.1, high: base + 0.5, low: base - 0.5, close: base, volume: 1000 - i * 5 };
+  });
+  const atrVal = ind.atr(upBars, 14);
+  assert(atrVal != null && atrVal > 0, "atr computes a positive value from real OHLC bars");
+  const stoch = ind.stochastic(upBars, 14, 3);
+  assert(stoch && stoch.k >= 0 && stoch.k <= 100 && stoch.d >= 0 && stoch.d <= 100, "stochastic %K/%D bounded 0-100");
+  const swing = ind.swingRange(upBars, 40);
+  assert(swing && swing.high > swing.low, "swing range finds a valid high/low leg");
+  const fib = ind.fibLevels(swing.low, swing.high, "up");
+  assert(fib.retracements.r618 < fib.retracements.r500 && fib.retracements.r500 < fib.retracements.r382, "retracement levels order correctly (deeper ratio = lower price in an uptrend)");
+  assert(fib.extensions.e1618 > fib.extensions.e1272 && fib.extensions.e2618 > fib.extensions.e1618, "extension levels increase with ratio");
+  ok("ATR, stochastic oscillator, swing-range and Fibonacci level helpers compute correctly from OHLCV bars");
+
+  // extreme volatility radar — real EWMA/realized vol, bounded outputs, no randomness
+  const calmSeries = Array.from({ length: 150 }, (_, i) => 100 + Math.sin(i / 40) * 0.5);
+  const calmRead = volatilityRadar.analyze(calmSeries);
+  assert(calmRead.ready === true, "volatility radar ready with enough bars");
+  assert(calmRead.extremeMoveLikelihoodPct >= 0 && calmRead.extremeMoveLikelihoodPct <= 100, "likelihood bounded 0-100");
+  assert(["CALM", "NORMAL", "ELEVATED", "EXTREME", "UNKNOWN"].includes(calmRead.regime), "regime enum");
+
+  // a violent shock at the tail should read a much higher vol percentile than a flat series
+  const shockSeries = calmSeries.slice();
+  for (let i = 0; i < 8; i++) {
+    const last = shockSeries[shockSeries.length - 1];
+    shockSeries.push(last * (1 + (i % 2 === 0 ? 0.08 : -0.07))); // violent whipsaw
+  }
+  const shockRead = volatilityRadar.analyze(shockSeries);
+  assert(shockRead.ewmaVolPct > calmRead.ewmaVolPct, "shock series reads higher EWMA vol than calm series");
+  assert(shockRead.percentile >= calmRead.percentile, "shock reads at/above calm's vol percentile");
+  assert(typeof shockRead.disclaimer === "string" && /not.*guarantee/i.test(shockRead.disclaimer), "radar is honestly labeled — never claims certainty");
+
+  const tooShort = volatilityRadar.analyze([1, 2, 3]);
+  assert(tooShort.ready === false, "radar refuses to guess on insufficient history");
+  ok("extreme volatility radar computes bounded, honestly-labeled regime reads from real price history");
 
   // strategy detects uptrend
   const s = strategy.evaluate(rising);
@@ -38,6 +99,87 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(b.approved === false, "low-conf trade rejected");
   ok("risk manager gates by confidence + exposure");
 
+  // micro-capital cold-start: absolute MAX_TRADE_USD ceiling, independent
+  // of (and tighter than) the percentage-based caps
+  const rmCapped = new RiskManager({ capital: { ...config.capital, maxTradeUsd: 5 } });
+  const cappedAssess = rmCapped.assess({ signal: "LONG", confidence: 0.9, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(cappedAssess.approved === true && cappedAssess.maxNotional <= 5, "MAX_TRADE_USD caps notional size regardless of how much room the percentage caps would otherwise allow");
+  ok("risk manager enforces an absolute MAX_TRADE_USD ceiling for micro-capital cold-start mode");
+
+  // rolling 24h drawdown-halt cooldown — must NOT clear just because
+  // midnight passed; only clears once its own cooldown timestamp elapses
+  const rm3 = new RiskManager({ capital: { ...config.capital, maxDailyDrawdownPct: 0.03, haltCooldownHours: 24 } });
+  rm3.updateEquity(10000);
+  rm3.updateEquity(9600); // 4% drawdown >= 3% limit -> halts
+  assert(rm3.halted === true && rm3.haltUntil > Date.now(), "drawdown halt sets a rolling cooldown ~24h out, not just a same-day flag");
+  rm3.dayKey = "2000-01-01"; // simulate the next tick crossing a calendar-day boundary
+  rm3.updateEquity(9600);
+  assert(rm3.halted === true, "halt survives a calendar-day rollover — no longer clears just because midnight passed");
+  rm3.haltUntil = Date.now() - 1000; // simulate the 24h cooldown having actually elapsed
+  rm3.updateEquity(9600);
+  assert(rm3.halted === false, "halt clears once its own rolling cooldown has actually elapsed");
+  ok("risk manager uses a true rolling cooldown for the daily-drawdown halt instead of clearing at the next calendar day");
+
+  // Aegis Guardian two-tier drawdown: soft brake (not sticky, live) vs
+  // hard killswitch (sticky, one-shot flattening trigger)
+  const rmAegis = new RiskManager({ capital: { ...config.capital, softBrakeDrawdownPct: 0.05, maxDailyDrawdownPct: 0.1, haltCooldownHours: 24 } });
+  rmAegis.updateEquity(10000);
+  const baseline = rmAegis.assess({ signal: "LONG", confidence: 0.9, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(baseline.softBraked === false && baseline.sizeFactor === 1, "no drawdown yet -> soft brake inactive, full size factor");
+  assert(rmAegis.maxLeverageCap() === Infinity, "no drawdown yet -> leverage uncapped by Aegis");
+
+  rmAegis.updateEquity(9400); // 6% drawdown -> crosses the 5% soft threshold, still under the 10% hard one
+  assert(rmAegis.softBraked === true && rmAegis.halted === false, "6% drawdown trips the soft brake but not the hard killswitch");
+  assert(rmAegis.maxLeverageCap() === 1, "soft brake caps leverage to 1x");
+  const softAssess = rmAegis.assess({ signal: "LONG", confidence: 0.9, equity: 9400, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(softAssess.approved === true && softAssess.sizeFactor === 0.5, "soft brake halves new-entry size factor but still allows the trade");
+
+  rmAegis.updateEquity(9900); // recovers back under 5% drawdown
+  assert(rmAegis.softBraked === false, "soft brake auto-clears the instant drawdown recovers — not sticky for the day");
+
+  assert(rmAegis.justTriggeredHardHalt === false, "one-shot hard-halt flag stays false until the hard threshold is actually crossed");
+  rmAegis.updateEquity(8900); // 11% drawdown -> crosses the 10% hard threshold
+  assert(rmAegis.halted === true && rmAegis.justTriggeredHardHalt === true, "11% drawdown trips the hard killswitch and raises the one-shot flatten-all flag");
+  rmAegis.updateEquity(8900); // next tick, still halted — flag must have been consumed/reset
+  assert(rmAegis.justTriggeredHardHalt === false, "one-shot hard-halt flag resets on the next tick so the engine only flattens once");
+  const hardAssess = rmAegis.assess({ signal: "LONG", confidence: 0.9, equity: 8900, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(hardAssess.approved === false, "hard-halted account refuses all new entries");
+  ok("Aegis Guardian two-tier drawdown: soft brake halves size + caps leverage (live, auto-clearing); hard killswitch halts + raises a one-shot flatten-all flag");
+
+  // DNFH respects the Aegis leverage ceiling when a shared risk instance is wired in
+  const rmForDnfh = new RiskManager({ capital: { ...config.capital, softBrakeDrawdownPct: 0.05, maxDailyDrawdownPct: 0.1 } });
+  rmForDnfh.updateEquity(10000);
+  rmForDnfh.updateEquity(9400); // soft-braked -> leverage capped to 1x
+  const dnfhWithRisk = new DnfhEngine({ exchanges: new ExchangeManager(config), wallet: null, config, risk: rmForDnfh });
+  assert(dnfhWithRisk.risk.maxLeverageCap() === 1, "DNFH sees the shared RiskManager's soft-braked leverage cap");
+  ok("DNFH planPosition's leverage cap respects an injected Aegis RiskManager instance");
+
+  // risk manager — volatility-regime-aware sizing (operationalizes the
+  // Extreme Volatility Radar instead of just alerting on it)
+  const rmVol = new RiskManager(config);
+  const calmAssess = rmVol.assess({ signal: "LONG", confidence: 0.8, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100, volatility: { ready: true, regime: "CALM" } });
+  const extremeAssess = rmVol.assess({ signal: "LONG", confidence: 0.8, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100, volatility: { ready: true, regime: "EXTREME" } });
+  assert(calmAssess.approved === true && extremeAssess.approved === true, "both calm and extreme regimes can still approve a high-conviction trade");
+  assert(extremeAssess.maxNotional < calmAssess.maxNotional, "EXTREME volatility regime shrinks the approved position size vs CALM, same signal/confidence");
+  const extremeLowConf = rmVol.assess({ signal: "LONG", confidence: 0.6, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100, volatility: { ready: true, regime: "EXTREME" } });
+  assert(extremeLowConf.approved === false, "EXTREME regime raises the confidence bar required for a NEW entry");
+  ok("risk manager scales position size + confidence bar down in choppier volatility regimes");
+
+  // risk manager — market-wide stress halt (independent of, and faster to
+  // clear than, the daily-drawdown breaker)
+  const rmStress = new RiskManager(config);
+  const calmUniverse = { A: { ready: true, regime: "CALM" }, B: { ready: true, regime: "NORMAL" }, C: { ready: true, regime: "CALM" } };
+  const stressedUniverse = { A: { ready: true, regime: "EXTREME" }, B: { ready: true, regime: "EXTREME" }, C: { ready: true, regime: "NORMAL" } };
+  rmStress.updateMarketStress(calmUniverse);
+  assert(rmStress.stressHalted === false, "no stress halt when most of the universe is calm");
+  rmStress.updateMarketStress(stressedUniverse);
+  assert(rmStress.stressHalted === true, "stress halt trips when >= threshold fraction of the universe is simultaneously EXTREME");
+  const duringStress = rmStress.assess({ signal: "LONG", confidence: 0.99, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(duringStress.approved === false && /MARKET-WIDE STRESS/.test(duringStress.reason), "new entries are refused during a market-wide stress halt, even at max confidence");
+  rmStress.updateMarketStress(calmUniverse);
+  assert(rmStress.stressHalted === false, "stress halt auto-clears the same day once conditions calm back down (unlike the drawdown breaker)");
+  ok("risk manager pauses new entries on market-wide volatility stress and auto-clears when it passes");
+
   // allocator
   const alloc = new Allocator(config);
   const { targets } = alloc.computeTargets([
@@ -48,6 +190,377 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(targets["BTC-USD"] > 0, "btc allocated");
   assert(targets["SOL-USD"] === undefined, "short not allocated in spot model");
   ok("allocator rotates capital into strongest longs");
+
+  // allocator — macro overlay can only ever shrink deployment, never boost it
+  const macroEvals = [
+    { symbol: "BTC-USD", signal: "LONG", confidence: 0.8, score: 0.6 },
+    { symbol: "ETH-USD", signal: "LONG", confidence: 0.7, score: 0.4 },
+  ];
+  const neutralTargets = alloc.computeTargets(macroEvals, {}).targets;
+  const riskOffTargets = alloc.computeTargets(macroEvals, { macro: { deployMultiplier: 0.65 } }).targets;
+  const riskOnTargets = alloc.computeTargets(macroEvals, { macro: { deployMultiplier: 1.4 } }).targets; // intentionally > 1
+  const sumWeights = (t) => Object.values(t).reduce((a, b) => a + b, 0);
+  assert(sumWeights(riskOffTargets) < sumWeights(neutralTargets), "RISK_OFF macro overlay deploys less total capital than no overlay");
+  assert(sumWeights(riskOnTargets) <= sumWeights(neutralTargets) + 1e-9, "a >1.0 macro multiplier is clamped — it can never deploy MORE than the configured risk ceiling allows");
+  ok("allocator macro overlay only ever throttles deployment, never exceeds the configured risk ceiling");
+
+  // AWP Capital Ring — Shield (80%)/Spear (20%) two-pool allocation on top
+  // of the existing per-symbol strategy router
+  const ringConfig = { ...config, capital: { ...config.capital, capitalRing: { enabled: true, shieldPct: 0.8, spearPct: 0.2, spearStrategies: ["fibonacci"] } } };
+  const ring = new CapitalRing(ringConfig);
+  assert(ring.isSpear("fibonacci") === true && ring.isSpear("momentum") === false, "capital ring classifies pools by routed strategy name");
+  const ringEvals = [
+    { symbol: "BTC-USD", strategy: "momentum", signal: "LONG", confidence: 0.8, score: 0.9 },
+    { symbol: "ETH-USD", strategy: "momentum", signal: "LONG", confidence: 0.8, score: 0.9 },
+    { symbol: "DOGE-USD", strategy: "fibonacci", signal: "LONG", confidence: 0.8, score: 0.9 },
+  ];
+  const ringResult = ring.computeTargets(ringEvals, {});
+  const shieldSum = (ringResult.targets["BTC-USD"] || 0) + (ringResult.targets["ETH-USD"] || 0);
+  const spearSum = ringResult.targets["DOGE-USD"] || 0;
+  assert(shieldSum > 0 && spearSum > 0, "both pools receive capital when both have qualifying LONG candidates");
+  assert(shieldSum <= config.capital.maxPortfolioRiskPct * 0.8 + 1e-9, "shield pool deployment never exceeds its 80% share of the risk budget");
+  assert(spearSum <= config.capital.maxPortfolioRiskPct * 0.2 + 1e-9, "spear pool deployment never exceeds its 20% share of the risk budget");
+  ok("Capital Ring splits deployment into an 80% shield / 20% spear pool by routed strategy, each independently capped");
+
+  // Spear pool's own scoped daily-loss ceiling halts NEW spear entries only
+  const spearPaper = {
+    trades: [{ tag: "spear", ts: Date.now(), pnl: -600 }], // big realized loss today, tagged spear
+    positions: {},
+  };
+  const spearRisk = ring.updateSpearRisk(spearPaper, 10000, {});
+  assert(spearRisk.halted === true, "spear pool halts new entries once its own scoped daily-loss ceiling is breached");
+  const ringAfterHalt = ring.computeTargets(ringEvals, {});
+  assert((ringAfterHalt.targets["DOGE-USD"] || 0) === 0, "halted spear pool receives zero NEW target allocation");
+  assert((ringAfterHalt.targets["BTC-USD"] || 0) > 0, "shield pool keeps trading normally while only the spear pool is halted");
+  ok("Capital Ring's spear-pool daily-loss ceiling halts spear-only trading without affecting the shield pool or the whole engine");
+
+  // macro flow classification — pure logic, no network
+  assert(macroFlow.classify(80, 2) === "RISK_ON", "high fear&greed + positive market-cap trend classifies RISK_ON");
+  assert(macroFlow.classify(15, 1) === "RISK_OFF", "very low fear&greed (extreme fear) classifies RISK_OFF regardless of market-cap trend");
+  assert(macroFlow.classify(90, -8) === "RISK_OFF", "a sharp market-cap drawdown classifies RISK_OFF even with high fear&greed");
+  assert(macroFlow.classify(50, 0) === "NEUTRAL", "middling readings classify NEUTRAL");
+  assert(macroFlow.classify(null, null) === "UNKNOWN", "no data classifies UNKNOWN rather than guessing");
+  assert(macroFlow.MULTIPLIER.RISK_OFF < macroFlow.MULTIPLIER.NEUTRAL && macroFlow.MULTIPLIER.NEUTRAL <= macroFlow.MULTIPLIER.RISK_ON, "multipliers only ever shrink deployment as the backdrop gets more cautious");
+  assert(Object.values(macroFlow.MULTIPLIER).every((m) => m <= 1), "no macro regime is ever allowed to multiply deployment above 1.0 (configured risk ceiling)");
+  ok("macro flow overlay classifies honestly and never multiplies deployment above the configured ceiling");
+
+  // Sortino-ratio allocation mode — a smoother (less downside-painful)
+  // series should get more weight than a jagged one at equal conviction score.
+  const smoothUp = Array.from({ length: 60 }, (_, i) => 100 * Math.pow(1.002, i));
+  const jaggedUp = smoothUp.map((v, i) => v * (1 + (i % 2 === 0 ? -0.03 : 0.01)));
+  const sortinoSmooth = sortinoRatio(smoothUp);
+  const sortinoJagged = sortinoRatio(jaggedUp);
+  assert(sortinoSmooth > sortinoJagged, "smoother uptrend scores a higher Sortino ratio than a jagged one");
+  // Use a wide per-position cap + tight portfolio budget so the weighting
+  // math actually determines the split instead of both hitting the same cap.
+  const sortinoConfig = {
+    ...config,
+    capital: { ...config.capital, allocationMethod: "sortino", maxPositionPct: 1, maxPortfolioRiskPct: 0.1 },
+  };
+  const allocSortino = new Allocator(sortinoConfig);
+  const { targets: sortinoTargets } = allocSortino.computeTargets(
+    [
+      { symbol: "SMOOTH", signal: "LONG", confidence: 0.8, score: 0.5 },
+      { symbol: "JAGGED", signal: "LONG", confidence: 0.8, score: 0.5 },
+    ],
+    { seriesBySymbol: { SMOOTH: smoothUp, JAGGED: jaggedUp } }
+  );
+  assert(sortinoTargets["SMOOTH"] > sortinoTargets["JAGGED"], "sortino mode sizes up the smoother ride at equal score");
+  ok("Sortino-ratio allocation mode rewards lower downside risk at equal conviction");
+
+  // AWP Kelly-Sortino position sizing: f* = (p*b - q)/b * sortino_scalar
+  assert(Math.abs(downsideDeviation(smoothUp) - 0) < 1e-9 || downsideDeviation(smoothUp) != null, "downsideDeviation computes from a price series");
+  assert(kellyFraction(0.6, 2) > 0, "positive-edge bet gets a positive Kelly fraction");
+  assert(kellyFraction(0.4, 1) === 0, "negative-edge bet clamps to a zero Kelly fraction (never sizes against your own edge)");
+  assert(sortinoScalar(0.01, 0.01) === 0.35, "sortino scalar clamps to the ceiling when target == realized (raw ratio 1.0 is above the 0.35 cap)");
+  assert(sortinoScalar(0.005, 0.05) === 0.1, "sortino scalar clamps to the floor when realized downside vol is far hotter than target");
+  assert(sortinoScalar(0.05, 0.005) === 0.35, "sortino scalar clamps to the ceiling when realized downside vol is far calmer than target");
+  const sized = kellySortinoFraction({ winProb: 0.6, winLossRatio: 2, targetDownsideVol: 0.01, realizedDownsideDeviation: 0.02 });
+  assert(sized.sizedFraction > 0 && sized.sizedFraction < sized.kellyFraction, "Kelly-Sortino sized fraction is a damped (smaller) version of the raw Kelly fraction");
+  ok("Sortino-Kelly position sizing (AWP spec) computes a bounded, edge-gated, volatility-damped bet fraction");
+
+  // Avellaneda-Stoikov (spot-adapted) market-making strategy
+  const flatSeries = Array.from({ length: 80 }, () => 100 + (Math.random() - 0.5) * 0.01);
+  const mmFlat = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 0 });
+  assert(["LONG", "FLAT", "SHORT"].includes(mmFlat.signal), "market-making signal enum");
+  assert(mmFlat.indicators.reservationPrice > 0, "reservation price computed");
+  const mmNoInv = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 0 });
+  const mmFullInv = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 1 });
+  assert(
+    mmFullInv.indicators.reservationPrice <= mmNoInv.indicators.reservationPrice,
+    "full inventory skews reservation price down (lean against existing size)"
+  );
+  ok("Avellaneda-Stoikov market-making strategy computes inventory-aware reservation price + spread");
+
+  // micro-capital gamma scaling — tiny equity should widen effective gamma
+  // (up to the configured cap) so quotes stay meaningfully wide/defensive
+  // relative to a well-capitalized book, per the spec's targetCapital design.
+  const mmBigEquity = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 0, equity: 1000 });
+  const mmTinyEquity = marketMaking.evaluate(flatSeries, {}, { inventoryRatio: 0, equity: 50 });
+  assert(mmBigEquity.indicators.gammaMultiplier === 1, "gamma multiplier is 1x at/above target capital");
+  assert(mmTinyEquity.indicators.gammaMultiplier > 1, "gamma multiplier scales up below target capital");
+  assert(mmTinyEquity.indicators.gammaMultiplier <= 6, "gamma multiplier respects the configured cap");
+  assert(mmTinyEquity.indicators.gamma > mmBigEquity.indicators.gamma, "scaled gamma is larger for the micro-capital book");
+  ok("market-making gamma scales up for micro-capital accounts and caps out per maxGammaMultiplier");
+
+  // Fibonacci confluence strategy — uptrend, pull back into the golden
+  // pocket on declining volume, with stochastic momentum turning up
+  const fibBars = [];
+  for (let i = 0; i < 50; i++) {
+    const c = 80 + (100 - 80) * (i / 49);
+    fibBars.push({ ts: i, open: c - 0.1, high: c + 0.3, low: c - 0.3, close: c, volume: 500 });
+  }
+  for (let i = 0; i < 25; i++) {
+    const c = 100 + (150 - 100) * (i / 24);
+    fibBars.push({ ts: 50 + i, open: c - 0.2, high: c + 0.6, low: c - 0.6, close: c, volume: 800 - i * 10 });
+  }
+  [148, 145, 140, 135, 130, 126, 123, 121, 119.5, 118.5, 117.8, 117.3, 117.6, 118.3, 118.8].forEach((c, i) => {
+    fibBars.push({ ts: 75 + i, open: c + 0.2, high: c + 0.5, low: c - 0.5, close: c, volume: 300 - i * 5 });
+  });
+  const fibPrices = fibBars.map((b) => b.close);
+  const fibResult = fibonacci.evaluate(fibPrices, {}, { bars: fibBars });
+  assert(fibResult.signal === "LONG", "fibonacci strategy fires LONG on a golden-pocket pullback with momentum + volume confirmation");
+  assert(fibResult.indicators.goldenPocket.inside === true, "golden pocket band correctly contains the pullback price");
+  assert(fibResult.indicators.tpPlan.tp2.price > fibResult.indicators.tpPlan.tp1.price, "take-profit ladder levels increase tier over tier");
+  const fibNoSignal = fibonacci.evaluate(fibPrices.slice(0, 70), {}, { bars: fibBars.slice(0, 70) });
+  assert(fibNoSignal.signal === "FLAT", "fibonacci strategy stays FLAT before price reaches the golden pocket");
+  ok("Fibonacci confluence strategy (AWP spear-pool entry) confirms golden-pocket pullbacks with momentum + volume, computes TP ladder");
+
+  // MEV defense — read-only risk assessment + execution planning, no network calls
+  const lowImpactQuote = { priceImpactPct: 0.002 };
+  const highImpactQuote = { priceImpactPct: 0.045 };
+  const lowRisk = mevDefense.assessRisk(lowImpactQuote, 100, {});
+  const highRisk = mevDefense.assessRisk(highImpactQuote, 1000, {});
+  assert(lowRisk.level === "MINIMAL" || lowRisk.level === "LOW", "low price-impact reads low sandwich risk");
+  assert(highRisk.level === "HIGH", "high price-impact reads high sandwich risk");
+  const plan = mevDefense.planExecution(1000, highRisk, { splitThresholdUsd: 250, maxChunks: 4 });
+  assert(plan.chunks > 1, "large + high-risk swap gets tranched");
+  const noSplitPlan = mevDefense.planExecution(50, lowRisk, { splitThresholdUsd: 250, maxChunks: 4 });
+  assert(noSplitPlan.chunks === 1, "small + low-risk swap stays single-shot");
+  ok("MEV defense assesses sandwich exposure from quote data + plans tranched execution");
+
+  // MEV defense — pre-broadcast abort (the realistic equivalent of
+  // "cancel before inclusion", since a public-mempool tx can't actually be
+  // un-sent) + priority-fee ceiling
+  const abortOnHighImpact = mevDefense.preBroadcastAbort(highRisk, {});
+  assert(abortOnHighImpact.abort === true, "pre-broadcast check aborts on HIGH quoted price impact");
+  const okImpactNoCongestion = mevDefense.preBroadcastAbort(lowRisk, { currentPriorityFeeGwei: 20, maxPriorityFeeGwei: 50 });
+  assert(okImpactNoCongestion.abort === false, "pre-broadcast check allows low-risk swaps under the priority-fee ceiling");
+  const abortOnCongestion = mevDefense.preBroadcastAbort(lowRisk, { currentPriorityFeeGwei: 80, maxPriorityFeeGwei: 50 });
+  assert(abortOnCongestion.abort === true, "pre-broadcast check aborts when current priority fee exceeds the configured ceiling, even on an otherwise low-risk swap");
+  const planWithCeiling = mevDefense.planExecution(1000, highRisk, { splitThresholdUsd: 250, maxChunks: 4, maxPriorityFeeGwei: 50 });
+  assert(planWithCeiling.maxPriorityFeeGwei === 50, "execution plan surfaces the configured priority-fee ceiling");
+  ok("MEV defense pre-broadcast abort refuses high-impact/congested swaps instead of claiming unrealistic in-flight mempool cancellation");
+
+  // HyperLiquid — monitor-only safety contract: reads need no secret, perps
+  // never enter the auto-rotation engine's venue pool.
+  const hl = new HyperLiquid({ walletAddress: "", privateKey: "" });
+  assert(hl.hasCredentials() === false, "hyperliquid reports no credentials without a wallet address");
+  const hlWithAddr = new HyperLiquid({ walletAddress: "0x0000000000000000000000000000000000000000" });
+  assert(hlWithAddr.hasCredentials() === true, "a public wallet address alone is enough for hyperliquid reads");
+  await assertThrowsAsync(() => hlWithAddr.placeOrder({ symbol: "BTC-PERP", side: "BUY", quantity: 1, limitPrice: 1 }, true), "no HYPERLIQUID_API_PRIVATE_KEY", "hyperliquid refuses orders without a dedicated API-wallet key");
+  const emHL = new ExchangeManager({ ...config, exchanges: { ...config.exchanges, primary: "hyperliquid" } });
+  assert(emHL.primary !== "hyperliquid", "engine refuses to auto-select a leveraged/perps venue as the spot rotation primary");
+  assert(emHL.spotVenues.includes("coinbase") && !emHL.spotVenues.includes("hyperliquid"), "hyperliquid excluded from spot venue pool");
+  await assertThrowsAsync(() => emHL.placeManualLeveragedOrder({ symbol: "BTC-PERP", side: "BUY", quantity: 1, limitPrice: 1 }), "LIVE TRADING DISARMED", "manual leveraged order path still requires the full live-arm gate");
+  ok("HyperLiquid wired as monitor-only: no secret needed to read, never auto-selected for spot rotation, orders stay gated");
+
+  // Tron — honest refusal: reads don't need swaps to exist
+  const tron = new TronWallet({ tron: { address: "", privateKey: "", apiBase: "https://api.trongrid.io" } });
+  assert(tron.hasKey() === false, "tron reports no key when unconfigured");
+  await assertThrowsAsync(() => tron.quote(), "no vetted", "tron refuses to quote without a vetted aggregator configured");
+  await assertThrowsAsync(() => tron.swap(), "BLOCKED", "tron refuses to swap without a vetted aggregator configured");
+  ok("Tron connector refuses swaps honestly instead of routing funds through an unverified relay");
+
+  // DNFH — delta-neutral funding harvest: real cross-venue yield strategy.
+  // Isolated fakes so this doesn't touch global live-arm state.
+  const fakeHlVenue = {
+    _info: async ({ type }) => {
+      assert(type === "metaAndAssetCtxs", "DNFH scan requests the right hyperliquid info type");
+      return [
+        { universe: [{ name: "VIRTUAL" }, { name: "PENGU" }, { name: "BTC" }] },
+        [
+          { funding: "0.0001", markPx: "2.5" }, // positive, highest -> should rank first
+          { funding: "-0.00005", markPx: "0.04" }, // negative -> filtered out (not supported)
+          { funding: "0.00002", markPx: "90000" }, // positive, lower -> should rank second
+        ],
+      ];
+    },
+  };
+  const dnfhConfig = { exchanges: { hyperliquid: { maxLeverage: 2 } }, canTradeLive: () => false, canSwapOnchain: () => false };
+  const dnfhExchanges = {
+    venues: { hyperliquid: fakeHlVenue },
+    placeManualLeveragedOrder: async () => { throw new Error("perp leg should never be called while disarmed"); },
+  };
+  const dnfhWallet = { swap: async () => { throw new Error("spot leg should never be called while disarmed"); }, quote: async () => ({}) };
+  const dnfh = new DnfhEngine({ exchanges: dnfhExchanges, wallet: dnfhWallet, config: dnfhConfig });
+
+  const scanResult = await dnfh.scan();
+  assert(scanResult.opportunities.length === 2, "DNFH scan keeps only positive-funding symbols (negative funding isn't supported, not guessed at)");
+  assert(scanResult.opportunities[0].symbol === "VIRTUAL", "DNFH scan ranks opportunities by annualized funding, descending");
+  assert(Math.abs(scanResult.opportunities[0].annualizedFundingPct - 0.0001 * 24 * 365 * 100) < 1e-6, "DNFH annualizes hourly funding correctly");
+
+  await assertThrowsAsync(() => dnfh.planPosition({ symbol: "VIRTUAL", usdNotional: 100 }), "spotTokenAddress is required", "DNFH refuses to plan without a caller-verified spot token address — it will not guess a contract address");
+  await assertThrowsAsync(() => dnfh.planPosition({ symbol: "PENGU", usdNotional: 100, spotTokenAddress: "0xabc" }), "no positive funding", "DNFH refuses to harvest a symbol that isn't paying positive funding right now");
+
+  const dnfhPlan = await dnfh.planPosition({ symbol: "VIRTUAL", usdNotional: 100, spotTokenAddress: "0xabc", leverage: 10 });
+  assert(dnfhPlan.leverage === 2, "DNFH hard-caps leverage to config max regardless of what's requested");
+  assert(dnfhPlan.legs.spot.usdNotional === 100 && dnfhPlan.legs.perp.usdNotional === 200, "DNFH sizes the perp short to leverage × spot notional, keeping the plan delta-neutral");
+
+  await assertThrowsAsync(() => dnfh.execute(dnfhPlan, {}), "BLOCKED", "DNFH execute refuses to run without the full live-arm AND on-chain-swap gate");
+  ok("DNFH: ranks real funding opportunities honestly, refuses to guess token addresses, hard-caps leverage, and stays fully gated");
+
+  // DNFH refinements: 22% entry threshold, net-edge-after-costs gate,
+  // persisted funding-epoch + delta-drift rebalance triggers
+  const fakeHlVenue2 = {
+    _info: async () => [
+      { universe: [{ name: "HOTCOIN" }, { name: "MEHCOIN" }] },
+      [
+        { funding: "0.0001", markPx: "2.5" }, // 87.6%/yr — clears the default 22% entry bar
+        { funding: "0.00001", markPx: "1.0" }, // 8.76%/yr — positive, but below the entry bar
+      ],
+    ],
+  };
+  const dnfhExchanges2 = { venues: { hyperliquid: fakeHlVenue2 }, placeManualLeveragedOrder: async () => ({}) };
+  const dnfhWallet2 = { swap: async () => ({}), quote: async () => ({}) };
+  const dnfh2 = new DnfhEngine({ exchanges: dnfhExchanges2, wallet: dnfhWallet2, config: { ...dnfhConfig, dnfh: { entryThresholdAnnualPct: 22, minNetEdge7dPct: 0.75 } } });
+
+  const scan2 = await dnfh2.scan();
+  const hot = scan2.opportunities.find((o) => o.symbol === "HOTCOIN");
+  const meh = scan2.opportunities.find((o) => o.symbol === "MEHCOIN");
+  assert(hot.meetsEntryThreshold === true, "scan flags a symbol clearing the 22% entry threshold");
+  assert(meh.meetsEntryThreshold === false, "scan flags a symbol below the 22% entry threshold even though funding is positive");
+
+  await assertThrowsAsync(
+    () => dnfh2.planPosition({ symbol: "MEHCOIN", usdNotional: 100, spotTokenAddress: "0xabc" }),
+    "below the 22% entry threshold",
+    "DNFH refuses to plan a harvest below the configured annualized-funding entry threshold"
+  );
+
+  // Net-edge gate: force it to fail with an unrealistically high basis-slippage override
+  await assertThrowsAsync(
+    () => dnfh2.planPosition({ symbol: "HOTCOIN", usdNotional: 100, spotTokenAddress: "0xabc", costOverrides: { basisSlippagePct: 5 } }),
+    "net edge",
+    "DNFH refuses to plan when projected net edge after costs falls below the ROI gate"
+  );
+
+  const okPlan = await dnfh2.planPosition({ symbol: "HOTCOIN", usdNotional: 100, spotTokenAddress: "0xabc" });
+  assert(okPlan.netEdge.passesGate === true && okPlan.netEdge.netEdgePct > 0.75, "DNFH plans a harvest that clears both the entry threshold and the net-edge gate");
+  ok("DNFH enforces the 22% annualized-funding entry threshold and the 0.75%/7d net-edge-after-costs gate");
+
+  // Rebalance triggers — delta drift and consecutive-negative-funding epochs
+  const rebalSymbol = `TEST-REBAL-${Date.now()}`;
+  dnfhStore.setOpenPosition(rebalSymbol, { spotQty: 10, perpQty: -10, spotEntryNotional: 1000, perpEntryNotional: 1000, spotEntryPx: 100, perpEntryPx: 100 });
+  const driftCheck = dnfh2.checkRebalanceTriggers(rebalSymbol, { spotPx: 100, perpPx: 103 }); // perp notional drifts 3% away from spot
+  assert(driftCheck.shouldRebalance === true && driftCheck.reasons.some((r) => r.includes("delta drift")), "DNFH flags a rebalance when the two legs' notionals drift beyond the configured threshold");
+  const noDriftCheck = dnfh2.checkRebalanceTriggers(rebalSymbol, { spotPx: 100, perpPx: 100.2 });
+  assert(noDriftCheck.shouldRebalance === false, "DNFH does not flag a rebalance when drift stays within the configured threshold and funding hasn't been negative");
+
+  for (let i = 0; i < 3; i++) dnfhStore.recordFundingEpoch(rebalSymbol, -0.001);
+  const negativeEpochCheck = dnfh2.checkRebalanceTriggers(rebalSymbol, { spotPx: 100, perpPx: 100.2 });
+  assert(negativeEpochCheck.shouldRebalance === true && negativeEpochCheck.reasons.some((r) => r.includes("negative")), "DNFH flags a rebalance after 3 consecutive negative funding epochs");
+  dnfhStore.clearOpenPosition(rebalSymbol);
+  ok("DNFH rebalance-trigger check detects both delta-drift and consecutive-negative-funding-epoch conditions");
+
+  // AVSS — scan-only cross-venue lag + price-flow-spike detector
+  const avssNow = Date.now();
+  const avssHistory = [];
+  let avssPx = 100;
+  for (let i = 30; i >= 6; i--) {
+    avssHistory.push({ ts: avssNow - i * 5000, price: avssPx });
+  }
+  for (let i = 5; i >= 0; i--) {
+    avssPx = avssPx * 1.006; // sharp climb inside the last 60s window
+    avssHistory.push({ ts: avssNow - i * 5000, price: avssPx });
+  }
+  const avssMarket = { universe: ["BTC-USD"], latest: { "BTC-USD": { price: avssPx } }, history: { "BTC-USD": avssHistory } };
+  const avssHl = { _info: async () => [{ universe: [{ name: "BTC" }] }, [{ markPx: String(avssPx * 1.003) }]] }; // 30bps rich vs spot
+  const avss = new AvssScanner({ exchanges: { venues: { hyperliquid: avssHl } }, market: avssMarket, config: { universe: ["BTC-USD"] } });
+  const avssResult = await avss.scan();
+  assert(avssResult.scanOnly === true, "AVSS is explicitly scan/report-only — no execution path");
+  const avssCandidate = avssResult.candidates[0];
+  assert(avssCandidate.lagTriggered === true, "AVSS flags a >18bps spot/perp lag");
+  assert(avssCandidate.flowTriggered === true, "AVSS flags a >3sigma 60s price-flow spike (proxy, not real CVD)");
+  assert(avssCandidate.triggered === true, "AVSS fires only when both the lag AND flow-spike conditions confirm");
+  assert(/NOT real trade-tagged CVD/.test(avssCandidate.note), "AVSS is honestly labeled as a price-based proxy, not real CVD");
+  const avssNoTrigger = await (async () => {
+    const calmMarket = { universe: ["BTC-USD"], latest: { "BTC-USD": { price: 100 } }, history: { "BTC-USD": avssHistory.map((h) => ({ ts: h.ts, price: 100 })) } };
+    const calmHl = { _info: async () => [{ universe: [{ name: "BTC" }] }, [{ markPx: "100.01" }]] };
+    return new AvssScanner({ exchanges: { venues: { hyperliquid: calmHl } }, market: calmMarket, config: { universe: ["BTC-USD"] } }).scan();
+  })();
+  assert(avssNoTrigger.candidates[0].triggered === false, "AVSS stays quiet when there's no lag and no flow spike");
+  assert(avssCandidate.netOpportunity && avssCandidate.netOpportunity.approved === true, "AVSS's generalized net-opportunity gate approves a 30bps lag against modest default costs");
+  const avssExpensive = new AvssScanner({
+    exchanges: { venues: { hyperliquid: avssHl } },
+    market: avssMarket,
+    config: { universe: ["BTC-USD"], avss: { minEdgeBps: 5, takerFeeBps: 15, targetSlippageBps: 10, mevRiskDiscountBps: 10 } }, // 35bps of costs > 30bps gross lag
+  });
+  const avssExpensiveResult = await avssExpensive.scan();
+  const avssExpensiveCandidate = avssExpensiveResult.candidates[0];
+  assert(avssExpensiveCandidate.lagTriggered === true && avssExpensiveCandidate.flowTriggered === true, "lag+flow conditions still confirm on their own");
+  assert(avssExpensiveCandidate.netOpportunity.approved === false, "net-opportunity gate rejects when modeled costs exceed the gross dislocation");
+  assert(avssExpensiveCandidate.triggered === false, "AVSS requires the net-opportunity gate to clear, even when lag+flow both confirm");
+  ok("AVSS scan-only detector confirms cross-venue lag + price-flow-spike confluence before flagging a candidate");
+  ok("AVSS's generalized net-opportunity gate (gross dislocation minus fees/slippage/MEV-discount) blocks triggers that wouldn't survive real execution costs");
+
+  // Generalized multi-chain net-opportunity formula — pure math, standalone
+  const { computeNetOpportunity } = require("../src/portfolio/netOpportunity");
+  const netOpp = computeNetOpportunity({
+    notionalUsd: 10000,
+    grossDislocationBps: 50,
+    gasCostUsd: 3,
+    takerFeeBps: 5,
+    targetSlippageBps: 8,
+    bridgeCostUsd: 2,
+    settlementLatencyPenaltyBps: 2,
+    mevRiskDiscountBps: 5,
+    minEdgeBps: 10,
+  });
+  assert(Math.abs(netOpp.grossUsd - 50) < 1e-6, "net-opportunity gross = notional * grossDislocationBps/10000");
+  const expectedCosts = 3 + (5 / 10000) * 10000 + (8 / 10000) * 10000 + 2 + (2 / 10000) * 10000 + (5 / 10000) * 10000;
+  assert(Math.abs(netOpp.totalCostUsd - expectedCosts) < 1e-6, "net-opportunity sums every cost component (gas + taker fee + slippage + bridge + settlement penalty + MEV discount)");
+  assert(Math.abs(netOpp.netUsd - (netOpp.grossUsd - netOpp.totalCostUsd)) < 1e-6, "net = gross - total costs");
+  assert(netOpp.approved === (netOpp.netBps >= 10), "approved reflects whether net bps clears the configured minimum edge");
+  assert(computeNetOpportunity({ notionalUsd: 1000, grossDislocationBps: 1, takerFeeBps: 50, minEdgeBps: 0 }).approved === false, "a tiny gross dislocation against a large fee is correctly rejected");
+  ok("generalized multi-chain net-opportunity formula computes gross/cost-breakdown/net/approved correctly, standalone");
+
+  // Order Flow Imbalance (OFI) — multi-level, snapshot-based proxy for a
+  // continuous L2 WebSocket tensor (see src/signals/orderFlow.js header)
+  const { computeOFI } = require("../src/signals/orderFlow");
+  const obPrev = { ts: 1000, bids: [[100, 5], [99.9, 4], [99.8, 3]], asks: [[100.1, 5], [100.2, 4], [100.3, 3]] };
+  const obNextBuyPressure = { ts: 2000, bids: [[100, 8], [99.9, 4], [99.8, 3]], asks: [[100.1, 2], [100.2, 4], [100.3, 3]] };
+  const ofiBuy = computeOFI(obPrev, obNextBuyPressure, 3);
+  assert(ofiBuy.ofi > 0 && ofiBuy.bias === "BUY_PRESSURE", "growing bid depth + shrinking ask depth at the same prices reads as buy-pressure OFI");
+  const obNextSellPressure = { ts: 2000, bids: [[100, 2], [99.9, 4], [99.8, 3]], asks: [[100.1, 9], [100.2, 4], [100.3, 3]] };
+  const ofiSell = computeOFI(obPrev, obNextSellPressure, 3);
+  assert(ofiSell.ofi < 0 && ofiSell.bias === "SELL_PRESSURE", "shrinking bid depth + growing ask depth at the same prices reads as sell-pressure OFI");
+  assert(computeOFI(null, obNextBuyPressure) === null, "OFI returns null (not a crash) without two snapshots to diff");
+  ok("Order Flow Imbalance (OFI) computes a multi-level, sign-correct, normalized imbalance from two order-book snapshots");
+
+  // Kalman-filter pairs cointegration — time-varying hedge ratio + spread z-score
+  const { kalmanPairSignal, KalmanBeta } = require("../src/signals/kalmanPairs");
+  const kfSeedBeta = 2;
+  const kalmanX = [];
+  const kalmanY = [];
+  let kx = 100;
+  for (let i = 0; i < 60; i++) {
+    kx = kx + (Math.sin(i / 7) * 0.3); // smooth, non-degenerate reference series
+    kalmanX.push(kx);
+    kalmanY.push(kx * kfSeedBeta); // near-perfect linear relationship, beta should converge to ~2
+  }
+  const kalmanResult = kalmanPairSignal(kalmanX, kalmanY, { zWindow: 20, zEntryThreshold: 2 });
+  assert(kalmanResult.ready === true, "Kalman pairs signal is ready once enough paired history has been fed in");
+  assert(Math.abs(kalmanResult.beta - kfSeedBeta) < 0.1, "Kalman filter's recursive beta estimate converges close to the true hedge ratio on a near-noiseless series");
+  assert(kalmanResult.signal === "FLAT", "no dislocation on a clean linear series with no injected spread shock -> FLAT signal");
+  const kalmanYShocked = kalmanY.slice();
+  kalmanYShocked[kalmanYShocked.length - 1] += 40; // inject a sudden spread blowout on the final observation
+  const kalmanShockResult = kalmanPairSignal(kalmanX, kalmanYShocked, { zWindow: 20, zEntryThreshold: 2 });
+  assert(kalmanShockResult.signal === "SHORT_Y_LONG_X", "a sudden positive spread shock (Y rich vs X) reads as a SHORT_Y_LONG_X mean-reversion signal");
+  assert(kalmanPairSignal([1, 2, 3], [1, 2, 3]).ready === false, "Kalman pairs signal honestly reports not-ready on insufficient history instead of guessing");
+  const kb = new KalmanBeta({ initialBeta: 1 });
+  const kbStep = kb.update(10, 20);
+  assert(typeof kbStep.beta === "number" && typeof kbStep.spread === "number", "KalmanBeta.update() returns a numeric beta + residual spread for a single step");
+  ok("Kalman-filter pairs cointegration estimator converges its recursive hedge-ratio beta and flags spread z-score dislocations");
 
   // paper broker (persistence disabled for isolation)
   const pb = new PaperBroker(config, { persist: false });
@@ -79,7 +592,54 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(state.cycle === 1, "engine ticked");
   assert(state.portfolio.equity > 0, "equity present");
   assert(Array.isArray(state.signals) && state.signals.length === config.universe.length, "signals per symbol");
+  assert(state.volatility && typeof state.volatility === "object", "volatility radar present in engine snapshot");
   ok("engine full pipeline tick completes end-to-end");
+
+  // Survivability gate: even when LIVE trading is fully armed, the engine
+  // must refuse to place a real order against a symbol whose current price
+  // came from the SIM fallback (feed unreachable) rather than a real quote.
+  const simGateEngine = {
+    config: { canTradeLive: () => true },
+    market: { latest: { "BTC-USD": { source: "SIM", price: 100 } } },
+    paper: { execute: (args) => ({ ...args, status: "FILLED", viaPaperFallback: true }) },
+    notifier: { notifyFill: () => {} },
+    exchanges: {
+      primary: "coinbase",
+      routeLiveOrder: async () => { throw new Error("a live order must never be attempted when the price source isn't confirmed LIVE"); },
+    },
+    _venueSymbol: Engine.prototype._venueSymbol,
+  };
+  const simGateFill = await Engine.prototype._execute.call(simGateEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
+  assert(simGateFill && simGateFill.viaPaperFallback === true, "live execution is refused and falls back to paper when price data isn't confirmed LIVE");
+
+  const liveGateEngine = {
+    config: { canTradeLive: () => true },
+    market: { latest: { "BTC-USD": { source: "LIVE", price: 100 } } },
+    paper: { execute: (args) => ({ ...args, status: "FILLED" }) },
+    notifier: { notifyFill: () => {} },
+    exchanges: {
+      primary: "coinbase",
+      routeLiveOrder: async (order) => { liveGateEngine._called = true; return { status: "FILLED", raw: { order } }; },
+    },
+    _venueSymbol: Engine.prototype._venueSymbol,
+  };
+  const liveGateFill = await Engine.prototype._execute.call(liveGateEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
+  assert(liveGateEngine._called === true, "a confirmed-LIVE price source is allowed to reach the exchange routing path");
+  assert(liveGateFill && liveGateFill.mode === "LIVE", "a successful live order is reported with mode=LIVE");
+  ok("engine refuses to risk real money on non-LIVE (SIM/stale) price data, even when fully armed");
+
+  // Aegis hard killswitch flatten-all: _flattenAll() must SELL every open
+  // paper position down to cash via the normal execution path
+  const flattenCalls = [];
+  const flattenEngine = {
+    paper: { positions: { "BTC-USD": { qty: 2, avgPrice: 100 }, "ETH-USD": { qty: 0, avgPrice: 0 } } },
+    _execute: async (args) => { flattenCalls.push(args); return { ...args, status: "FILLED" }; },
+  };
+  const flattenResult = await Engine.prototype._flattenAll.call(flattenEngine, { "BTC-USD": { price: 110 }, "ETH-USD": { price: 200 } });
+  assert(flattenCalls.length === 1 && flattenCalls[0].symbol === "BTC-USD" && flattenCalls[0].side === "SELL", "_flattenAll sells only symbols with an actual open position (qty>0), ignoring zero/closed entries");
+  assert(Math.abs(flattenCalls[0].notional - 220) < 1e-9, "_flattenAll sells the full position notional (qty * current price)");
+  assert(flattenResult.length === 1 && flattenResult[0].symbol === "BTC-USD", "_flattenAll reports every position it flattened");
+  ok("Aegis hard killswitch's _flattenAll() liquidates every open paper position via the normal SELL execution path");
 
   // backtester over synthetic history
   const { syntheticCloses } = require("../src/backtest/history");
@@ -90,6 +650,43 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   assert(bt.bars > 0 && bt.equityCurve.length === bt.bars, "backtest produces curve");
   assert(typeof bt.sharpe === "number" && typeof bt.maxDrawdownPct === "number", "backtest metrics");
   ok("backtester runs strategy over history + reports metrics");
+
+  // Stage 2 cold-start gate: block-bootstrap synthetic path validation
+  const svConfig = config;
+  const validator = new SyntheticValidator(svConfig);
+
+  const strongUp = (n, start, drift) => {
+    const out = [start];
+    let px = start;
+    for (let i = 1; i < n; i++) {
+      px = px * (1 + drift);
+      out.push(px);
+    }
+    return out;
+  };
+  const trendingSeries = { "BTC-USD": strongUp(150, 100, 0.01), "ETH-USD": strongUp(150, 50, 0.009) };
+  const trendingResult = validator.validate(trendingSeries, { runs: 60, strategy: "momentum", seed: 7 });
+  assert(trendingResult.validRuns > 0, "synthetic validator produces valid runs from a real price series");
+  assert(trendingResult.passRate > 0 && trendingResult.autonomousEligible === true, "a strategy that wins consistently across resampled paths clears the Stage 2 autonomous-eligibility gate");
+  assert(/block-bootstrap/.test(trendingResult.method) && /NOT raw order-book/.test(trendingResult.method), "synthetic validator honestly discloses it resamples price history, not raw order-book snapshots");
+
+  const choppy = (n, start) => {
+    const out = [start];
+    let px = start;
+    for (let i = 1; i < n; i++) {
+      px = px * (1 + (Math.sin(i * 1.3) + Math.sin(i * 0.7)) * 0.01);
+      out.push(px);
+    }
+    return out;
+  };
+  const choppySeries = { "BTC-USD": choppy(150, 100), "ETH-USD": choppy(150, 50) };
+  const choppyResult = validator.validate(choppySeries, { runs: 60, strategy: "momentum", seed: 7 });
+  assert(choppyResult.autonomousEligible === false, "a strategy with no durable edge on a choppy market fails to clear the Stage 2 gate");
+  assert(choppyResult.passRate < trendingResult.passRate, "a genuinely strong edge passes the synthetic gate at a materially higher rate than a choppy, edge-less market");
+
+  const sameSeedResult = validator.validate(trendingSeries, { runs: 60, strategy: "momentum", seed: 7 });
+  assert(sameSeedResult.passRate === trendingResult.passRate, "a fixed seed reproduces the exact same synthetic run set (deterministic, auditable)");
+  ok("Stage 2 synthetic validator (block-bootstrap resampling) gates autonomous eligibility on Sortino >= threshold across the configured pass rate");
 
   // wallet gate must be OFF by default
   const WalletManager = require("../src/wallet/manager");
@@ -233,7 +830,6 @@ const ok = (name) => { console.log("  ✓", name); passed++; };
   try { fs3.unlinkSync(credStore.STORE_PATH); } catch {}
   credStore.set("kraken", { key: "abc", secret: "xyz" });
   assert(credStore.load().kraken.key === "abc", "credStore persists venue keys");
-  const ExchangeManager = require("../src/exchange/manager");
   const em = new ExchangeManager(config);
   assert(em.venues.kraken.hasCredentials(), "manager loads saved credentials on boot");
   em.disconnect("kraken");

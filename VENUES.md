@@ -10,6 +10,8 @@ what's wired up, the real fee/capital math, and how to add more venues.
 | Capability | Status |
 |---|---|
 | Adapters for **Coinbase**, **Binance.US**, **Kraken** | ✅ `src/exchange/*.js` |
+| **HyperLiquid** (perps DEX) | ✅ monitor-only — `src/exchange/hyperliquid.js` |
+| **On-chain**: Solana (Jupiter), EVM/Ethereum+Base+BNB Chain (0x), Tron (reads only) | ✅ `src/wallet/*.js` |
 | Health-check all venues at once | ✅ `GET /api/exchanges/health` |
 | Read-only balances, per venue | ✅ `GET /api/exchanges/balances?venue=kraken` |
 | **Aggregated balances across ALL venues** | ✅ `GET /api/exchanges/balances/all` |
@@ -18,6 +20,50 @@ what's wired up, the real fee/capital math, and how to add more venues.
 | Single kill-switch gating every venue | ✅ `config.canTradeLive()` |
 
 Pick your active venue with `PRIMARY_EXCHANGE=coinbase|binanceus|kraken`.
+
+### HyperLiquid — monitor-only, by design
+HyperLiquid is a **leveraged perpetuals** DEX, not spot — a fundamentally
+different risk model than "buy/sell a % of equity in an asset you fully
+own," which is what the automatic rotation engine assumes everywhere else.
+So it's wired for:
+- **Reads**: set `HYPERLIQUID_WALLET_ADDRESS` (just the public address — no
+  key of any kind) and the dashboard shows your perp equity, margin used,
+  and open positions via HyperLiquid's public `/info` endpoint.
+- **Manual orders only**: `POST /api/hyperliquid/order` places a real
+  leveraged order, gated behind the full live-arm lock, but it is **never**
+  called automatically by the rotation loop. If you generate a dedicated
+  trade-only "API wallet" key in HyperLiquid's UI (never your main wallet's
+  key) and set `HYPERLIQUID_API_PRIVATE_KEY`, you can use this endpoint
+  yourself — deliberately, one order at a time.
+
+### Tron — reads work, swaps intentionally disabled
+Set `TRON_ADDRESS` (a public address — no key needed) and balance reads work
+immediately via TronGrid's public API. Swaps are refused with a clear error:
+no officially-documented, no-middleman-commission Tron DEX aggregator API
+was available to wire up responsibly at build time. See `docs/TRON_SWAP.md`
+for exactly what's needed to turn them on once you've picked a provider you trust.
+
+### DNFH — Delta-Neutral Funding Harvest (manual, cross-venue, hard-capped)
+A real strategy, not an auto-traded one: hold **spot LONG on Base** and an
+equal-notional **perp SHORT on HyperLiquid** at the same time, so net price
+exposure is ~0 — you collect the funding payment perp longs pay shorts
+whenever funding is positive, independent of which way price moves.
+- `GET /api/dnfh/scan` — read-only, ranks live HyperLiquid funding rates by
+  annualized yield. Only positive-funding symbols are "harvestable"; this
+  module does not support short-spot, so negative-funding symbols are
+  filtered out rather than guessed at.
+- `POST /api/dnfh/plan` — pure math, no funds move. **You must supply the
+  exact spot token contract address yourself** (verified against the
+  project's own docs or a verified block-explorer entry) — this module will
+  never guess a contract address for you; getting that wrong with real
+  money means buying the wrong asset.
+- `POST /api/dnfh/execute` — moves real funds on both legs. Requires the
+  full live-arm gate **and** `ONCHAIN_TRADING_ENABLED=true`. Leverage is
+  hard-capped at `HYPERLIQUID_MAX_LEVERAGE` (default 2x) — this is a yield
+  tool, not a place to stack directional risk. If the perp leg fails after
+  the spot leg already filled, it does **not** silently auto-unwind (that's
+  itself a real trade) — it returns a loud partial-fill warning so a human
+  decides the next move.
 
 ### Easiest way to connect: the Connections page
 Open **`/connect.html`** (🔌 Connect in the dashboard header). For each venue you get
@@ -28,10 +74,15 @@ balance check. **Disconnect** wipes them. Live trading stays off regardless — 
 only enables read-only access until you deliberately arm it.
 
 > Wallet **private keys** are intentionally *not* accepted through the web form (they
-> control all your funds). Set `SOLANA_PRIVATE_KEY` / `EVM_PRIVATE_KEY` in `.env`; the
-> Connections page shows their status.
+> control all your funds). Set `SOLANA_PRIVATE_KEY` / `EVM_PRIVATE_KEY` / `TRON_PRIVATE_KEY`
+> / `HYPERLIQUID_API_PRIVATE_KEY` in `.env`; the Connections page shows their status.
+>
+> The same page also has a **"Connect a wallet from your browser"** section that asks
+> MetaMask/Coinbase Wallet/Trust Wallet/Phantom for your **public address only** —
+> no signature, no key, no seed phrase, ever — just to look up a balance.
 
 ---
+
 
 ## Real fees (entry tier, 2025–2026 published schedules)
 

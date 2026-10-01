@@ -38,6 +38,54 @@ v2 replaces that core with real, working machinery:
 | Strategy routing | 1 global | Per-symbol / per-strategy routing — momentum on majors, mean-reversion on alts, simultaneously (`config.resolveStrategy`) |
 | Journal & analytics | none | Closed-trade journal + analytics page: win rate, profit factor, expectancy, drawdown, PnL distribution (`src/analytics`, `/analytics.html`) |
 | CI | none | GitHub Actions: self-test on Node 18/20/22 + boot smoke test (`ci/`, see `ci/README.md`) |
+| Volatility forecasting | none | **Extreme Volatility Radar** — real EWMA/realized-vol regime detection, Bollinger-squeeze compression flags, and an empirical (percentile-based) "extreme-move likelihood" score per symbol (`src/volatility/predictor.js`, `/api/volatility`, dashboard panel) |
+| Market making | none | **Avellaneda-Stoikov (spot-adapted)** strategy — inventory-aware reservation price + optimal spread from real EWMA vol, skews away from your own existing position instead of blindly chasing score (`src/signals/strategies/marketMaking.js`) |
+| Allocation | conviction-score only | Optional **Sortino-ratio allocation mode** — blends conviction with each candidate's trailing risk-adjusted (downside-only) return, so a smoother ride gets sized up over a jagged one at equal score (`src/portfolio/sortino.js`, `ALLOCATION_METHOD=sortino`) |
+| On-chain swap safety | slippage cap only | **MEV defense** — reads the aggregator's own price-impact figure to flag sandwich-attack exposure, tranches large/high-risk swaps into smaller delayed chunks, and can route through a protected relay when configured (`src/wallet/mevDefense.js`, `/api/wallet/assess`, read-only, never touches anyone else's transactions) |
+| Venues | Coinbase, Binance.US, Kraken, Solana, EVM (ETH/Base/BNB) | + **HyperLiquid** (perps, monitor-only — reads need just a public address, never auto-traded by the rotation loop) and **Tron** (balance reads via public TronGrid API; swaps intentionally disabled until a vetted aggregator is configured, see `docs/TRON_SWAP.md`) |
+| Wallet connect | server-side `.env` keys only | + **browser injected-wallet connect** (MetaMask / Coinbase Wallet / Trust Wallet / Phantom) on `/connect.html` — asks for the **public address only**, never a signature or key; pairs with a fully read-only `/api/wallet/lookup` for balance display |
+| Yield strategies | none | + **DNFH (delta-neutral funding harvest)** — real long-spot(Base)/short-perp(HyperLiquid) funding-rate capture, net exposure ~0. Manual/gated only (`GET /api/dnfh/scan`, `POST /api/dnfh/plan`, `POST /api/dnfh/execute`), hard-capped leverage, never guesses a token contract address, never auto-unwinds a partial fill silently — see `VENUES.md` |
+| Risk sizing | flat per-symbol/portfolio caps | + **Volatility-regime-aware sizing** — the Extreme Volatility Radar now actually throttles risk instead of just alerting: position size shrinks and the confidence bar rises automatically in ELEVATED/EXTREME regimes (`src/risk/riskManager.js`) |
+| Circuit breakers | daily-drawdown halt only | + **Market-wide stress halt** — pauses NEW entries (exits always still run) if too much of the tracked universe is simultaneously reading EXTREME volatility at once; auto-clears the same day once it passes, independent of the (sticky-for-the-day) drawdown breaker |
+| Live-data safety | none | + **Non-LIVE price gate** — even fully armed, the engine refuses to place a real order against a symbol whose current tick came from the SIM fallback (feed unreachable) rather than a genuine live quote; falls back to the paper ledger instead of trading on a fabricated price |
+| Macro overlay | none | + **Risk-appetite overlay** — Fear & Greed Index + global market-cap trend (`src/intelligence/flow.js`, `GET /api/intelligence/flow`), bounded so it can only ever *shrink* deployed capital in a risk-off backdrop, never push exposure above your configured `MAX_PORTFOLIO_RISK_PCT` |
+
+### Extreme Volatility Radar (honest read)
+No system — ours included — can predict volatility with certainty; markets are
+fat-tailed and regimes can break without warning. What this module *does* do,
+with real math and no randomness:
+
+- **EWMA volatility** (RiskMetrics λ=0.94) — reacts fast to fresh shocks.
+- **Multi-window realized vol** (10/20/60-bar stdev of log returns).
+- **Vol-of-vol** — is volatility itself accelerating (regime destabilizing)?
+- **Bollinger-width squeeze** — historically, tight compression often precedes
+  expansion (a documented pattern, not a promise).
+- **Empirical percentile rank** — where current vol sits vs. its own trailing
+  history, turned into a bounded 0–100 "extreme-move likelihood" score and a
+  CALM / NORMAL / ELEVATED / EXTREME regime label.
+- **Plain-English expected range** — 1σ/2σ move size in % and $ from the
+  current EWMA vol.
+
+Every response carries a `disclaimer` field and the same honesty rule as the
+rest of this repo: it's a statistical estimate from real price history, never
+a guarantee, and never financial advice. See `SAFETY.md`.
+
+### MEV defense (not a sandwich tool)
+`src/wallet/mevDefense.js` protects *your own* on-chain swaps — it never
+inspects or acts on anyone else's transactions. It reads the price-impact
+number Jupiter/0x already return for your quote, flags sandwich-attack
+exposure (MINIMAL/LOW/MEDIUM/HIGH), and — only when risk is real and the
+notional is large — splits the swap into smaller delayed tranches instead of
+broadcasting one easy-to-spot transaction. Call `/api/wallet/assess`
+(read-only, no funds move) to see the assessment before arming anything.
+
+### Pluggable strategy slots awaiting your spec
+Three strategy names were referenced without rules attached: `dnfh`,
+`overlord`, and `autonomouswealth`. Each is registered in
+`src/signals/strategies/placeholders.js` as a real, selectable strategy that
+always returns `FLAT` with a pointer to its spec template in
+`docs/strategies/`. Fill in the template (entry/exit rules, timeframe,
+sizing, risk limits) and they'll be implemented with real logic + tests.
 
 ### LIVE vs SIM labeling
 Every price, signal, and candidate is tagged **`LIVE`** or **`SIM`**. If the host
@@ -85,6 +133,7 @@ server.js ──► src/engine/engine.js  (the loop)
                  ├─ src/signals/strategy.js     facade -> strategies/ registry
                  │     └─ strategies/ momentum · meanReversion · ensemble
                  │     └─ paramStore.js         persists tuned params (auto-applied)
+                 ├─ src/volatility/predictor.js Extreme Volatility Radar (EWMA/realized vol, squeeze, regime)
                  ├─ src/risk/riskManager.js     caps, exposure, drawdown breaker
                  ├─ src/portfolio/allocator.js  conviction-weighted rotation targets
                  ├─ src/paper/broker.js         simulated fills @ real prices (default)

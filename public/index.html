@@ -15,7 +15,7 @@
     color:var(--txt);font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;font-size:13px}
   a{color:var(--blue);text-decoration:none}
   .header{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;
-    border-bottom:1px solid var(--line);background:rgba(8,11,20,.7);position:sticky;top:0;z-index:10;backdrop-filter:blur(6px)}
+    border-bottom:1px solid var(--line);background:rgba(8,11,20,.7);position:sticky;top:0;z-index:20;backdrop-filter:blur(6px)}
   .brand{display:flex;align-items:center;gap:12px}
   .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--green),var(--blue));
     display:flex;align-items:center;justify-content:center;color:#04121a;font-weight:900}
@@ -27,17 +27,35 @@
   .b-sim{border-color:var(--amber);color:var(--amber)}
   .b-paper{border-color:var(--blue);color:var(--blue)}
   .b-armed{border-color:var(--red);color:var(--red);box-shadow:0 0 12px rgba(255,77,109,.35)}
+  .b-soft{border-color:var(--amber);color:var(--amber)}
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
   .pulse{animation:pulse 1.6s infinite}
   @keyframes pulse{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
+
+  /* ---- App shell: sidebar + tabbed content ---- */
+  .appwrap{display:flex;align-items:flex-start}
+  .sidebar{width:196px;flex:0 0 196px;padding:16px 10px;position:sticky;top:57px;
+    height:calc(100vh - 57px);overflow-y:auto;border-right:1px solid var(--line)}
+  .navgroup{margin-bottom:14px}
+  .navgroup .navlabel{font-size:9px;letter-spacing:2px;color:var(--muted);padding:0 10px;margin-bottom:6px;text-transform:uppercase}
+  .navitem{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:8px;color:var(--muted);
+    cursor:pointer;font-size:12px;letter-spacing:.3px;margin-bottom:2px;border:1px solid transparent;user-select:none}
+  .navitem:hover{background:rgba(74,168,255,.08);color:var(--txt)}
+  .navitem.active{background:rgba(0,255,163,.08);color:var(--green);border-color:rgba(0,255,163,.25)}
+  .navitem .ic{width:16px;text-align:center;flex:0 0 16px}
+  .navitem .nbadge{margin-left:auto;font-size:9px;padding:1px 5px;border-radius:8px;background:rgba(255,77,109,.18);color:var(--red)}
+  .content{flex:1;min-width:0}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+
   .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;padding:18px 22px}
   .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
     border-radius:14px;padding:16px;overflow:hidden}
   .card h3{margin:0 0 12px;font-size:11px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;
-    display:flex;justify-content:space-between;align-items:center}
+    display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
   .kpi{font-size:26px;font-weight:800;letter-spacing:1px}
   .kpi.small{font-size:18px}
-  .pos{color:var(--green)} .neg{color:var(--red)} .mut{color:var(--muted)}
+  .pos{color:var(--green)} .neg{color:var(--red)} .mut{color:var(--muted)} .warn-txt{color:var(--amber)}
   .span3{grid-column:span 3}.span4{grid-column:span 4}.span5{grid-column:span 5}
   .span6{grid-column:span 6}.span7{grid-column:span 7}.span8{grid-column:span 8}.span12{grid-column:span 12}
   table{width:100%;border-collapse:collapse;font-size:12px}
@@ -48,10 +66,19 @@
   .t-long{background:rgba(0,255,163,.14);color:var(--green)}
   .t-short{background:rgba(255,77,109,.14);color:var(--red)}
   .t-flat{background:rgba(108,122,156,.14);color:var(--muted)}
+  .t-calm{background:rgba(0,255,163,.14);color:var(--green)}
+  .t-normal{background:rgba(108,122,156,.14);color:var(--muted)}
+  .t-elevated{background:rgba(255,193,7,.16);color:var(--amber)}
+  .t-extreme{background:rgba(255,77,109,.18);color:var(--red)}
+  .t-unknown{background:rgba(108,122,156,.14);color:var(--muted)}
+  .vbar{height:6px;width:70px;background:#1a2337;border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle}
+  .vbar i{display:block;height:100%;background:linear-gradient(90deg,var(--green),var(--amber),var(--red))}
   .t-strong{background:rgba(0,255,163,.16);color:var(--green)}
   .t-promising{background:rgba(74,168,255,.16);color:var(--blue)}
   .t-watch{background:rgba(255,200,87,.14);color:var(--amber)}
   .t-avoid{background:rgba(255,77,109,.14);color:var(--red)}
+  .t-approved{background:rgba(0,255,163,.16);color:var(--green)}
+  .t-rejected{background:rgba(255,77,109,.14);color:var(--red)}
   .bar{height:6px;border-radius:4px;background:#16203a;overflow:hidden}
   .bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--green))}
   .flag{font-size:9px;padding:1px 5px;border:1px solid var(--line);border-radius:4px;color:var(--muted);margin-right:3px}
@@ -62,12 +89,18 @@
   canvas{width:100%;height:120px;display:block}
   .foot{padding:10px 22px;color:var(--muted);font-size:11px;border-top:1px solid var(--line);text-align:center}
   .warnbox{background:rgba(255,200,87,.08);border:1px solid var(--amber);color:var(--amber);
-    padding:8px 12px;border-radius:8px;font-size:11px;margin:0 22px}
+    padding:8px 12px;border-radius:8px;font-size:11px;margin:0 22px 0}
+  .infobox{background:rgba(74,168,255,.06);border:1px solid rgba(74,168,255,.35);color:var(--txt);
+    padding:8px 12px;border-radius:8px;font-size:11px;margin-bottom:12px}
   .mini{font-size:10px;color:var(--muted)}
   .mini-btn{background:transparent;border:1px solid var(--blue);color:var(--blue);border-radius:6px;
     padding:2px 8px;font-size:10px;cursor:pointer;font-family:inherit}
   .mini-btn:hover{background:rgba(74,168,255,.12)}
   .mini-btn.danger{border-color:var(--red);color:var(--red)}
+  .mini-btn.danger:hover{background:rgba(255,77,109,.12)}
+  .mini-btn.go{border-color:var(--green);color:var(--green)}
+  .mini-btn.go:hover{background:rgba(0,255,163,.12)}
+  .mini-btn:disabled{opacity:.35;cursor:not-allowed}
   .live-pill{margin-left:14px;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;
     letter-spacing:1px;text-decoration:none;border:1px solid;white-space:nowrap}
   .live-pill.paper{color:var(--green);border-color:rgba(0,255,163,.45);background:rgba(0,255,163,.08)}
@@ -75,9 +108,20 @@
     animation:livepulse 1.6s ease-in-out infinite}
   .live-pill.testnet{color:var(--amber);border-color:rgba(255,200,87,.5);background:rgba(255,200,87,.1)}
   @keyframes livepulse{0%,100%{box-shadow:0 0 0 0 rgba(255,77,109,.5)}50%{box-shadow:0 0 0 6px rgba(255,77,109,0)}}
-  .mini-btn.danger:hover{background:rgba(255,77,109,.12)}
-  .mini-select{background:#070b14;border:1px solid #1a2337;color:#cdd8f0;border-radius:6px;
-    padding:2px 6px;font-size:10px;font-family:inherit}
+  .mini-select,.mini-input{background:#070b14;border:1px solid #1a2337;color:#cdd8f0;border-radius:6px;
+    padding:3px 7px;font-size:11px;font-family:inherit}
+  .mini-input{width:110px}
+  .formrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  .formrow label{font-size:10px;color:var(--muted);letter-spacing:.5px}
+  .divider{height:1px;background:var(--line);margin:12px 0}
+  @media(max-width:900px){
+    .appwrap{flex-direction:column}
+    .sidebar{width:100%;flex:none;height:auto;position:relative;top:0;border-right:none;
+      border-bottom:1px solid var(--line);display:flex;overflow-x:auto;padding:8px 10px}
+    .navgroup{display:flex;margin-bottom:0;margin-right:10px}
+    .navgroup .navlabel{display:none}
+    .navitem{white-space:nowrap}
+  }
   @media(max-width:1000px){.grid>*{grid-column:span 12!important}}
 </style>
 </head>
@@ -101,95 +145,328 @@
     </div>
   </div>
 
-  <div id="simnote" class="warnbox" style="display:none"></div>
+  <div id="simnote" class="warnbox" style="display:none;margin-top:12px"></div>
 
-  <div class="grid">
-    <!-- KPIs -->
-    <div class="card span3"><h3>Equity</h3><div class="kpi" id="k-equity">—</div><div class="mini" id="k-equity-sub">—</div></div>
-    <div class="card span3"><h3>Total PnL</h3><div class="kpi" id="k-pnl">—</div><div class="mini" id="k-pnl-sub">realized / cash</div></div>
-    <div class="card span3"><h3>Cycle</h3><div class="kpi" id="k-cycle">—</div><div class="mini" id="k-mode">—</div></div>
-    <div class="card span3"><h3>Risk State</h3><div class="kpi small" id="k-risk">—</div><div class="mini" id="k-risk-sub">—</div></div>
-
-    <!-- Equity curve -->
-    <div class="card span8"><h3>Equity Curve <span class="mini" id="curve-src"></span></h3><canvas id="curve"></canvas></div>
-
-    <!-- Live prices -->
-    <div class="card span4"><h3>Live Prices</h3>
-      <table><thead><tr><th>Asset</th><th>Price</th><th>24h</th><th>Src</th></tr></thead>
-      <tbody id="prices"></tbody></table>
-    </div>
-
-    <!-- Signals -->
-    <div class="card span7"><h3>Strategy Signals <span class="mini">per-symbol routed strategy</span></h3>
-      <table><thead><tr><th>Asset</th><th>Strategy</th><th>Signal</th><th>Score</th><th>Conf</th><th>RSI</th><th>Target</th></tr></thead>
-      <tbody id="signals"></tbody></table>
-    </div>
-
-    <!-- Portfolio -->
-    <div class="card span5"><h3>Portfolio / Positions</h3>
-      <table><thead><tr><th>Asset</th><th>Qty</th><th>Value</th><th>uPnL</th></tr></thead>
-      <tbody id="positions"></tbody></table>
-    </div>
-
-    <!-- Backtest -->
-    <div class="card span12"><h3>Strategy Backtest
-      <span>
-        <button class="mini-btn" onclick="runBacktest(400)">Run 400-bar</button>
-        <button class="mini-btn" onclick="runBacktest(1000)">Run 1000-bar</button>
-      </span></h3>
-      <div id="bt-status" class="mini">Validate the live rotation strategy on historical data before risking capital.</div>
-      <div id="bt-metrics" style="display:flex;gap:22px;flex-wrap:wrap;margin:12px 0"></div>
-      <canvas id="bt-curve" style="height:140px"></canvas>
-    </div>
-
-    <!-- Optimizer -->
-    <div class="card span12"><h3>Strategy Optimizer &amp; Walk-Forward
-      <span>
-        <select id="opt-strat" class="mini-select">
-          <option value="momentum">momentum</option>
-          <option value="meanreversion">meanreversion</option>
-        </select>
-        <button class="mini-btn" onclick="runOptimize()">Grid Search</button>
-        <button class="mini-btn" onclick="runWalkForward()">Walk-Forward</button>
-      </span></h3>
-      <div id="opt-status" class="mini">Grid-search tunes parameters; walk-forward validates them on unseen data (guards against curve-fitting).</div>
-      <div id="opt-body" style="margin-top:10px"></div>
-    </div>
-
-    <!-- Wallet -->
-    <div class="card span12"><h3>On-Chain Wallet (self-custody swaps) <span class="mini" id="wallet-src"></span></h3>
-      <table><thead><tr><th>Network</th><th>Wallet Address</th><th>Key</th><th>Quotes</th><th>Swaps</th></tr></thead>
-      <tbody id="wallet"></tbody></table>
-      <div class="mini" id="wallet-note" style="margin-top:8px"></div>
-    </div>
-
-    <!-- Memecoin radar -->
-    <div class="card span12"><h3>Memecoin Detection Radar <span class="mini" id="meme-src"></span></h3>
-      <div class="scan">
-      <table><thead><tr><th>Score</th><th>Rating</th><th>Token</th><th>Chain</th><th>Price</th><th>Liquidity</th><th>Vol 24h</th><th>1h</th><th>Age</th><th>Turnover</th><th>Flags</th><th>Action</th></tr></thead>
-      <tbody id="memecoins"></tbody></table>
+  <div class="appwrap">
+    <div class="sidebar" id="sidebar">
+      <div class="navgroup">
+        <div class="navlabel">Core</div>
+        <div class="navitem active" data-tab="overview"><span class="ic">◆</span> Overview</div>
+        <div class="navitem" data-tab="signals"><span class="ic">▤</span> Signals &amp; Portfolio</div>
       </div>
-      <div class="mini" id="ape-result" style="margin-top:8px"></div>
+      <div class="navgroup">
+        <div class="navlabel">Sophia</div>
+        <div class="navitem" data-tab="micro"><span class="ic">∿</span> Volatility &amp; Microstructure</div>
+      </div>
+      <div class="navgroup">
+        <div class="navlabel">Market Overlord</div>
+        <div class="navitem" data-tab="yield"><span class="ic">⇄</span> Yield &amp; Arbitrage</div>
+      </div>
+      <div class="navgroup">
+        <div class="navlabel">Validation</div>
+        <div class="navitem" data-tab="lab"><span class="ic">⚗</span> Backtest &amp; Optimizer</div>
+      </div>
+      <div class="navgroup">
+        <div class="navlabel">Capital</div>
+        <div class="navitem" data-tab="wallet"><span class="ic">◈</span> Wallet &amp; Memecoins</div>
+        <div class="navitem" data-tab="exchanges"><span class="ic">⇌</span> Exchanges &amp; Live Control</div>
+      </div>
+      <div class="navgroup">
+        <div class="navlabel">Performance</div>
+        <div class="navitem" data-tab="journal"><span class="ic">✎</span> Journal &amp; Analytics</div>
+      </div>
+      <div class="navgroup">
+        <div class="navlabel">Ops</div>
+        <div class="navitem" data-tab="chronicle"><span class="ic">☰</span> Chronicle &amp; Log</div>
+      </div>
     </div>
 
-    <!-- Exchanges -->
-    <div class="card span5"><h3>Exchange Connectivity</h3>
-      <table><thead><tr><th>Venue</th><th>Keys</th><th>Reachable</th><th>Note</th></tr></thead>
-      <tbody id="exchanges"></tbody></table>
-      <div class="mini" style="margin-top:8px" id="live-note"></div>
-    </div>
+    <div class="content">
 
-    <!-- Fills -->
-    <div class="card span7"><h3>Recent Fills</h3>
-      <table><thead><tr><th>Time</th><th>Mode</th><th>Side</th><th>Asset</th><th>Notional</th><th>Price</th></tr></thead>
-      <tbody id="fills"></tbody></table>
-    </div>
+      <!-- ===================== OVERVIEW ===================== -->
+      <div class="tab-pane active" data-pane="overview">
+        <div class="grid">
+          <div class="card span3"><h3>Equity</h3><div class="kpi" id="k-equity">—</div><div class="mini" id="k-equity-sub">—</div></div>
+          <div class="card span3"><h3>Total PnL</h3><div class="kpi" id="k-pnl">—</div><div class="mini" id="k-pnl-sub">realized / cash</div></div>
+          <div class="card span3"><h3>Cycle</h3><div class="kpi" id="k-cycle">—</div><div class="mini" id="k-mode">—</div></div>
+          <div class="card span3"><h3>Aegis Risk State</h3><div class="kpi small" id="k-risk">—</div><div class="mini" id="k-risk-sub">—</div></div>
 
-    <!-- Alerts + Log -->
-    <div class="card span4"><h3>Alerts</h3>
-      <div id="alerts"></div>
+          <div class="card span8"><h3>Equity Curve <span class="mini" id="curve-src"></span></h3><canvas id="curve"></canvas></div>
+
+          <div class="card span4"><h3>Aegis Guardian — Two-Tier Drawdown</h3>
+            <div id="aegis-detail" class="mini">—</div>
+          </div>
+
+          <div class="card span6"><h3>Macro Risk-Appetite Overlay <span class="mini">Fear &amp; Greed + global market-cap trend</span></h3>
+            <div id="macro-detail">—</div>
+          </div>
+          <div class="card span6"><h3>AWP Capital Ring <span class="mini">Shield / Spear two-pool allocation</span>
+            <button class="mini-btn" onclick="loadCapitalRing()">Refresh</button></h3>
+            <div id="capital-ring-overview">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== SIGNALS & PORTFOLIO ===================== -->
+      <div class="tab-pane" data-pane="signals">
+        <div class="grid">
+          <div class="card span4"><h3>Live Prices</h3>
+            <table><thead><tr><th>Asset</th><th>Price</th><th>24h</th><th>Src</th></tr></thead>
+            <tbody id="prices"></tbody></table>
+          </div>
+
+          <div class="card span8"><h3>Strategy Signals <span class="mini">per-symbol routed strategy</span></h3>
+            <table><thead><tr><th>Asset</th><th>Strategy</th><th>Signal</th><th>Score</th><th>Conf</th><th>RSI</th><th>Target</th></tr></thead>
+            <tbody id="signals"></tbody></table>
+          </div>
+
+          <div class="card span5"><h3>Portfolio / Positions</h3>
+            <table><thead><tr><th>Asset</th><th>Qty</th><th>Value</th><th>uPnL</th></tr></thead>
+            <tbody id="positions"></tbody></table>
+          </div>
+
+          <div class="card span7"><h3>Recent Fills</h3>
+            <table><thead><tr><th>Time</th><th>Mode</th><th>Side</th><th>Asset</th><th>Notional</th><th>Price</th></tr></thead>
+            <tbody id="fills"></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== VOLATILITY & MICROSTRUCTURE (Sophia) ===================== -->
+      <div class="tab-pane" data-pane="micro">
+        <div class="grid">
+          <div class="card span12"><h3>Extreme Volatility Radar
+            <span class="mini">EWMA/realized-vol regime, squeeze detection &amp; empirical extreme-move likelihood — statistical estimate, not a guarantee</span></h3>
+            <table><thead><tr><th>Asset</th><th>Regime</th><th>Vol Percentile</th><th>EWMA Vol</th><th>1σ / 2σ Move</th><th>Extreme-Move Likelihood</th><th>Squeeze</th><th>Why</th></tr></thead>
+            <tbody id="volatility"></tbody></table>
+          </div>
+
+          <div class="card span6"><h3>Order Flow Imbalance (OFI) <span class="mini">Coinbase L2 book, slow REST poll — not a WS tensor</span></h3>
+            <div class="infobox">Classic Cont/Kukanov/Stoikov order-flow-imbalance, extended to the top-N book levels between two snapshots a poll apart. Needs 2 polls (seconds apart) to compute a delta — click Poll twice.</div>
+            <div class="formrow">
+              <label>Symbol</label><select id="ofi-symbol" class="mini-select"></select>
+              <label>Levels</label><input id="ofi-levels" class="mini-input" type="number" value="10" min="1" max="25" style="width:55px">
+              <button class="mini-btn go" onclick="pollOFI()">Poll Order Book</button>
+            </div>
+            <div id="ofi-result" class="mini">No poll yet.</div>
+          </div>
+
+          <div class="card span6"><h3>Kalman-Filter Pairs Cointegration <span class="mini">time-varying hedge ratio + spread z-score</span></h3>
+            <div class="infobox">Scalar recursive Kalman filter over two already-tracked price series — pure math, no new data feed. SHORT_* signals are informational rotation tilts only (spot-only engine, no short inventory).</div>
+            <div class="formrow">
+              <label>X (reference)</label><select id="kalman-x" class="mini-select"></select>
+              <label>Y (paired)</label><select id="kalman-y" class="mini-select"></select>
+              <button class="mini-btn go" onclick="computeKalman()">Compute</button>
+            </div>
+            <div id="kalman-result" class="mini">No computation yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== YIELD & ARBITRAGE (Market Overlord) ===================== -->
+      <div class="tab-pane" data-pane="yield">
+        <div class="grid">
+          <div class="card span12"><h3>DNFH — Delta-Neutral Funding Harvest <span class="mini">HyperLiquid perp funding, scan/plan only — never auto-trades</span>
+            <button class="mini-btn go" onclick="scanDnfh()">Scan Funding</button></h3>
+            <div id="dnfh-status" class="mini">Ranks real positive-funding opportunities on HyperLiquid. Long spot + short perp to harvest funding, net price exposure ~0.</div>
+            <table><thead><tr><th>Symbol</th><th>Hourly Funding</th><th>Annualized</th><th>Mark Px</th><th>Open Interest</th><th>Meets 22% Bar</th><th>Plan</th></tr></thead>
+            <tbody id="dnfh-rows"></tbody></table>
+            <div id="dnfh-plan-result" class="mini" style="margin-top:8px"></div>
+            <div class="mini" style="margin-top:6px">Planning computes the hypothetical spot+perp legs and cost gate only — no funds move. Executing a harvest is an advanced, fully-gated action left to the API (<code>POST /api/dnfh/execute</code>), not exposed here.</div>
+            <div class="divider"></div>
+            <div class="mini mut" style="margin-bottom:6px">Rebalance trigger check — for a HARVEST you already have open (delta drift &gt;1.5% or 3 consecutive negative funding epochs):</div>
+            <div class="formrow">
+              <label>Symbol</label><input id="dnfh-rebal-symbol" class="mini-input" placeholder="BTC" style="width:70px">
+              <label>Spot Px</label><input id="dnfh-rebal-spot" class="mini-input" type="number" style="width:90px">
+              <label>Perp Px</label><input id="dnfh-rebal-perp" class="mini-input" type="number" style="width:90px">
+              <button class="mini-btn" onclick="checkDnfhRebalance()">Check</button>
+            </div>
+            <div id="dnfh-rebal-result" class="mini">No check run yet.</div>
+          </div>
+
+          <div class="card span12"><h3>AVSS — Asymmetric Volatility Skew Scalper <span class="mini">scan-only cross-venue lag + flow-spike + net-opportunity detector</span>
+            <button class="mini-btn go" onclick="scanAvss()">Scan Now</button></h3>
+            <div id="avss-status" class="mini">Compares Coinbase spot vs. HyperLiquid perp mark for lag, a price-flow-spike proxy, and a generalized net-opportunity cost gate (fees+slippage+MEV discount). No execution path — read and act manually.</div>
+            <table><thead><tr><th>Symbol</th><th>Lag (bps)</th><th>Flow Z (proxy)</th><th>Net Opportunity</th><th>Direction</th><th>Triggered</th></tr></thead>
+            <tbody id="avss-rows"></tbody></table>
+          </div>
+
+          <div class="card span12"><h3>AWP Capital Ring — Shield / Spear Allocation <span class="mini">two-pool capital split, independent spear daily-loss ceiling</span>
+            <button class="mini-btn" onclick="loadCapitalRing()">Refresh</button></h3>
+            <div id="capital-ring-detail">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== BACKTEST / OPTIMIZER / VALIDATOR ===================== -->
+      <div class="tab-pane" data-pane="lab">
+        <div class="grid">
+          <div class="card span12"><h3>Strategy Backtest
+            <span>
+              <button class="mini-btn" onclick="runBacktest(400)">Run 400-bar</button>
+              <button class="mini-btn" onclick="runBacktest(1000)">Run 1000-bar</button>
+            </span></h3>
+            <div id="bt-status" class="mini">Validate the live rotation strategy on historical data before risking capital.</div>
+            <div id="bt-metrics" style="display:flex;gap:22px;flex-wrap:wrap;margin:12px 0"></div>
+            <canvas id="bt-curve" style="height:140px"></canvas>
+          </div>
+
+          <div class="card span12"><h3>Strategy Optimizer &amp; Walk-Forward
+            <span>
+              <select id="opt-strat" class="mini-select">
+                <option value="momentum">momentum</option>
+                <option value="meanreversion">meanreversion</option>
+                <option value="marketmaking">marketmaking (Avellaneda-Stoikov)</option>
+              </select>
+              <button class="mini-btn" onclick="runOptimize()">Grid Search</button>
+              <button class="mini-btn" onclick="runWalkForward()">Walk-Forward</button>
+            </span></h3>
+            <div id="opt-status" class="mini">Grid-search tunes parameters; walk-forward validates them on unseen data (guards against curve-fitting).</div>
+            <div id="opt-body" style="margin-top:10px"></div>
+          </div>
+
+          <div class="card span5"><h3>Saved / Tuned Params <span class="mini">auto-applied on engine boot</span>
+            <button class="mini-btn" onclick="loadParams()">Refresh</button></h3>
+            <div id="params-body">—</div>
+          </div>
+
+          <div class="card span7"><h3>Stage 2 Cold-Start Gate — Synthetic Path Validator
+            <span>
+              <button class="mini-btn go" onclick="runValidator(200)">Run 200 paths</button>
+              <button class="mini-btn go" onclick="runValidator(1000)">Run 1000 paths</button>
+            </span></h3>
+            <div id="val-status" class="mini">Block-bootstrap resamples real recent price history into synthetic paths, and only clears the gate if the strategy's Sortino ratio holds up across most of them — guards against a lucky single backtest.</div>
+            <div id="val-body" style="margin-top:10px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== WALLET / MEMECOINS ===================== -->
+      <div class="tab-pane" data-pane="wallet">
+        <div class="grid">
+          <div class="card span12"><h3>On-Chain Wallet (self-custody swaps) <span class="mini" id="wallet-src"></span>
+            <a class="mini-btn" href="/connect.html" style="text-decoration:none">Manage keys →</a></h3>
+            <table><thead><tr><th>Network</th><th>Wallet Address</th><th>Key</th><th>Quotes</th><th>Swaps</th></tr></thead>
+            <tbody id="wallet"></tbody></table>
+            <div class="mini" id="wallet-note" style="margin-top:8px"></div>
+          </div>
+
+          <div class="card span12"><h3>Connect a Wallet From Your Browser <span class="mini">read-only — public address only, never a seed phrase or signature</span></h3>
+            <div class="infobox">Asks your wallet extension for its PUBLIC address only. No funds can move from this — it's the safest possible way to just look at a balance on the dashboard. Private keys for actual server-side execution are set once in <code>.env</code> and managed on the Connect page, never typed into a web form.</div>
+            <div class="formrow">
+              <button class="mini-btn" onclick="connectInjectedEvm()">🦊 MetaMask / Coinbase Wallet / Trust Wallet</button>
+              <button class="mini-btn" onclick="connectPhantom()">👻 Phantom (Solana)</button>
+            </div>
+            <div class="formrow">
+              <label>Chain</label>
+              <select id="manual-chain" class="mini-select">
+                <option value="tron">Tron</option><option value="ethereum">Ethereum</option>
+                <option value="base">Base</option><option value="bsc">BNB Chain</option><option value="solana">Solana</option>
+              </select>
+              <input id="manual-address" class="mini-input" style="width:300px" placeholder="paste a PUBLIC address (never a seed phrase or private key)">
+              <button class="mini-btn go" onclick="lookupManualWallet()">Look up balance</button>
+            </div>
+            <div id="connected-wallets" style="margin-top:8px"></div>
+          </div>
+
+          <div class="card span12"><h3>MEV / Sandwich-Exposure Assessment <span class="mini">read-only — never moves funds</span></h3>
+            <div class="infobox">Assesses a proposed swap's sandwich exposure from the aggregator's own quoted price impact, and recommends tranching + protected-relay routing. This is pre-broadcast defense, not in-flight mempool cancellation (not generally achievable by anyone — see docs/strategies/OVERLORD.md).</div>
+            <div class="formrow">
+              <label>Chain</label>
+              <select id="mev-chain" class="mini-select"><option value="solana">solana</option><option value="base">base</option><option value="ethereum">ethereum</option><option value="bsc">bsc</option></select>
+              <label>Token Address</label><input id="mev-token" class="mini-input" style="width:260px" placeholder="0x... or base58 mint">
+              <label>USD</label><input id="mev-usd" class="mini-input" type="number" value="250" style="width:70px">
+              <button class="mini-btn go" onclick="assessMev()">Assess</button>
+            </div>
+            <div id="mev-result" class="mini">No assessment yet.</div>
+          </div>
+
+          <div class="card span12"><h3>Memecoin Detection Radar <span class="mini" id="meme-src"></span></h3>
+            <div class="scan">
+            <table><thead><tr><th>Score</th><th>Rating</th><th>Token</th><th>Chain</th><th>Price</th><th>Liquidity</th><th>Vol 24h</th><th>1h</th><th>Age</th><th>Turnover</th><th>Flags</th><th>Action</th></tr></thead>
+            <tbody id="memecoins"></tbody></table>
+            </div>
+            <div class="mini" id="ape-result" style="margin-top:8px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== EXCHANGES ===================== -->
+      <div class="tab-pane" data-pane="exchanges">
+        <div class="grid">
+          <div class="card span5"><h3>Exchange Connectivity</h3>
+            <table><thead><tr><th>Venue</th><th>Keys</th><th>Reachable</th><th>Note</th></tr></thead>
+            <tbody id="exchanges"></tbody></table>
+            <div class="mini" style="margin-top:8px" id="live-note"></div>
+          </div>
+
+          <div class="card span7" id="live-card"><h3>⚡ Live Trading Control <span class="mini">armed = real orders with real money</span></h3>
+            <div id="live-status" class="mini">—</div>
+            <div class="warnbox" id="live-warnbox" style="display:none;margin:10px 0 0"></div>
+            <div id="live-controls" style="margin-top:10px"></div>
+            <div id="live-result" class="mini" style="margin-top:6px"></div>
+            <div class="divider"></div>
+            <div class="formrow">
+              <label>Rotation engine:</label>
+              <span id="engine-run-state" class="mini">—</span>
+              <button class="mini-btn go" onclick="engineControl('start')">Start</button>
+              <button class="mini-btn danger" onclick="engineControl('stop')">Stop</button>
+            </div>
+          </div>
+
+          <div class="card span12"><h3>Exchange API Keys &amp; Balances <span class="mini">read+trade scoped keys only — never enable withdrawals</span>
+            <button class="mini-btn" onclick="loadExchangeBalances()">Refresh Balances</button></h3>
+            <div class="warnbox" style="display:block;margin:0 0 12px">🔒 Only paste API keys with withdrawals DISABLED. Keys are saved server-side to data/credentials.json (git-ignored) and stay read-only until you arm live trading above. Full key-management UI (with setup instructions) also lives at <a href="/connect.html">/connect.html</a>.</div>
+            <div id="venues-mgmt"></div>
+          </div>
+
+          <div class="card span7"><h3>HyperLiquid — Manual Leveraged Order <span class="mini">monitor-only venue; auto-rotation never trades here</span></h3>
+            <div class="infobox">This is a deliberately manual, advanced action — the automatic rotation engine never places HyperLiquid orders on its own. Routes through the same live-arm gates as everything else; stays a PAPER-safe no-op until armed.</div>
+            <div class="formrow">
+              <label>Symbol</label><input id="hl-symbol" class="mini-input" placeholder="BTC" style="width:70px">
+              <label>Side</label><select id="hl-side" class="mini-select"><option value="BUY">BUY</option><option value="SELL">SELL</option></select>
+              <label>Qty</label><input id="hl-qty" class="mini-input" type="number" style="width:80px">
+              <label>Limit Px</label><input id="hl-price" class="mini-input" type="number" style="width:90px">
+              <label><input id="hl-reduceonly" type="checkbox"> Reduce-only</label>
+              <button class="mini-btn danger" onclick="placeHlOrder()">Place Order</button>
+            </div>
+            <div id="hl-result" class="mini">No order placed.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== JOURNAL & ANALYTICS ===================== -->
+      <div class="tab-pane" data-pane="journal">
+        <div class="grid">
+          <div class="card span12"><h3>Closed-Trade Analytics <span class="mini">computed from the paper ledger's round-trip trades</span>
+            <button class="mini-btn" onclick="loadAnalytics()">Refresh</button>
+            <a class="mini-btn" href="/analytics.html" style="text-decoration:none">Full charts →</a></h3>
+            <div id="analytics-kpis" style="display:flex;gap:22px;flex-wrap:wrap;margin:6px 0 14px">—</div>
+            <div id="analytics-symbols"></div>
+          </div>
+
+          <div class="card span12"><h3>Trade Journal <span class="mini">most recent closed round-trips</span></h3>
+            <table><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>PnL %</th><th>Hold</th></tr></thead>
+            <tbody id="journal-rows"></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CHRONICLE / ALERTS / LOG ===================== -->
+      <div class="tab-pane" data-pane="chronicle">
+        <div class="grid">
+          <div class="card span8"><h3>Chronicle <span class="mini">persisted per-cycle execution record — equity, actions, top signal</span></h3>
+            <table><thead><tr><th>Time</th><th>Cycle</th><th>Data</th><th>Equity</th><th>Actions</th><th>Top Signal</th></tr></thead>
+            <tbody id="chronicle-rows"></tbody></table>
+          </div>
+          <div class="card span4"><h3>Alerts</h3>
+            <div id="alerts"></div>
+          </div>
+          <div class="card span12"><h3>System Log</h3><div class="log" id="log"></div></div>
+        </div>
+      </div>
+
     </div>
-    <div class="card span8"><h3>System Log</h3><div class="log" id="log"></div></div>
   </div>
 
   <div class="foot">SAINT CORE v2 · Paper-safe by default · Live execution requires explicit arming · Not financial advice</div>
@@ -202,19 +479,53 @@ const pct = (n) => n==null?"—":(n>=0?"+":"")+fmt(n)+"%";
 const cls = (n) => n>=0?"pos":"neg";
 const shortP = (p)=> p==null?"—": (p<1? "$"+Number(p).toPrecision(3) : "$"+fmt(p, p>1000?0:2));
 
+// ---- Tab switching ----
+function initTabs(){
+  document.querySelectorAll(".navitem").forEach(item=>{
+    item.addEventListener("click", ()=>{
+      document.querySelectorAll(".navitem").forEach(i=>i.classList.remove("active"));
+      document.querySelectorAll(".tab-pane").forEach(p=>p.classList.remove("active"));
+      item.classList.add("active");
+      const pane = document.querySelector(`.tab-pane[data-pane="${item.dataset.tab}"]`);
+      if(pane) pane.classList.add("active");
+      try{ localStorage.setItem("saint_tab", item.dataset.tab); }catch(_){}
+      window.dispatchEvent(new CustomEvent("saint-tab-shown",{detail:item.dataset.tab}));
+    });
+  });
+  try{
+    const saved = localStorage.getItem("saint_tab");
+    if(saved){ const el=document.querySelector(`.navitem[data-tab="${saved}"]`); if(el) el.click(); }
+  }catch(_){}
+}
+
 function badges(d){
   const el=$("badges"); el.innerHTML="";
   const conn = window.__wsOpen;
   add(el, `<span class="dot pulse" style="background:${conn?'var(--green)':'var(--red)'}"></span>${conn?'CONNECTED':'OFFLINE'}`, conn?'b-live':'b-armed');
   add(el, d.dataSource==='LIVE'?'DATA: LIVE':(d.dataSource==='SIM'?'DATA: SIM':'DATA: '+d.dataSource), d.dataSource==='LIVE'?'b-live':'b-sim');
   add(el, d.liveArmed?'⚠ LIVE ARMED':'PAPER MODE', d.liveArmed?'b-armed':'b-paper');
+  if(d.risk && d.risk.softBraked) add(el, '⚠ AEGIS SOFT BRAKE', 'b-soft');
   if(d.strategy&&d.strategy.active) add(el, 'STRAT: '+d.strategy.active.toUpperCase(), 'b-paper');
   add(el, 'v'+d.version, '');
 }
 function add(el,html,c){const s=document.createElement('span');s.className='badge '+(c||'');s.innerHTML=html;el.appendChild(s);}
 
+// Populate OFI/Kalman symbol dropdowns once we know the configured universe.
+let __universePopulated = false;
+function populateUniverseSelects(symbols){
+  if(__universePopulated || !symbols || !symbols.length) return;
+  __universePopulated = true;
+  const opts = symbols.map(s=>`<option value="${s}">${s}</option>`).join("");
+  $("ofi-symbol").innerHTML = opts;
+  $("kalman-x").innerHTML = opts;
+  $("kalman-y").innerHTML = opts;
+  if(symbols[1]) $("kalman-y").value = symbols[1];
+}
+
 function render(d){
   badges(d);
+  populateUniverseSelects((d.market.symbols||[]).map(s=>s.symbol));
+
   // sim note
   if(d.dataSource!=='LIVE'){
     $("simnote").style.display="block";
@@ -228,9 +539,38 @@ function render(d){
   $("k-pnl-sub").innerText=`realized ${money(p.realizedPnl)} · cash ${money(p.cash)}`;
   $("k-cycle").innerText=d.cycle;
   $("k-mode").innerText=`${d.mode} · ${d.running?'RUNNING':'IDLE'}`;
-  const r=d.risk;
-  $("k-risk").innerHTML = r.halted? '<span class="neg">HALTED</span>':'<span class="pos">NOMINAL</span>';
-  $("k-risk-sub").innerText = r.halted? r.haltReason : `dd limit ${(r.limits.maxDailyDrawdownPct*100).toFixed(0)}% · maxpos ${(r.limits.maxPositionPct*100).toFixed(0)}%`;
+
+  // Aegis two-tier risk state
+  const r=d.risk||{};
+  if(r.halted){
+    $("k-risk").innerHTML = '<span class="neg">HARD HALT</span>';
+    $("k-risk-sub").innerText = r.haltReason || '—';
+  } else if(r.softBraked){
+    $("k-risk").innerHTML = '<span class="warn-txt">SOFT BRAKE</span>';
+    $("k-risk-sub").innerText = r.softBrakeReason || 'new entries halved, leverage capped 1x';
+  } else {
+    $("k-risk").innerHTML = '<span class="pos">NOMINAL</span>';
+    $("k-risk-sub").innerText = `dd limit ${((r.limits?.maxDailyDrawdownPct||0)*100).toFixed(0)}% · maxpos ${((r.limits?.maxPositionPct||0)*100).toFixed(0)}%`;
+  }
+  $("aegis-detail").innerHTML = `
+    <div>Hard killswitch: ${r.halted?'<span class="neg">HALTED</span>':'<span class="pos">clear</span>'} ${r.haltUntil?`<span class="mini">(clears ${new Date(r.haltUntil).toLocaleString()})</span>`:''}</div>
+    <div style="margin-top:4px">Soft brake (5% dd): ${r.softBraked?'<span class="warn-txt">ACTIVE — size ×0.5, leverage cap 1x</span>':'<span class="mut">inactive</span>'}</div>
+    <div style="margin-top:4px">Market-wide stress halt: ${r.stressHalted?'<span class="neg">ACTIVE</span>':'<span class="pos">clear</span>'} <span class="mini">(${r.stress?.extremeCount||0}/${r.stress?.total||0} symbols EXTREME)</span></div>
+    <div style="margin-top:4px" class="mini">Max leverage cap right now: <b>${r.maxLeverageCap===Infinity||r.maxLeverageCap==null?'unconstrained':r.maxLeverageCap+'x'}</b></div>
+  `;
+
+  // Macro overlay
+  const mf = d.macro || {};
+  if(mf.ready===undefined){
+    $("macro-detail").innerHTML = `<span class="mut">warming up…</span>`;
+  } else {
+    $("macro-detail").innerHTML = `
+      <div class="kpi small">${mf.regime||'UNKNOWN'} <span class="mini">· deploy ×${mf.deployMultiplier??1}</span></div>
+      <div class="mini" style="margin-top:6px">Fear &amp; Greed: ${mf.fearGreed?mf.fearGreed.value+' ('+mf.fearGreed.classification+')':'—'}</div>
+      <div class="mini">Global mcap 24h: ${mf.market?pct(mf.market.mcapChangePct24h):'—'} · BTC dom ${mf.market?fmt(mf.market.btcDominancePct,1)+'%':'—'}</div>
+      <div class="mini" style="margin-top:6px;color:var(--muted)">${mf.disclaimer||''}</div>
+    `;
+  }
 
   // prices
   $("prices").innerHTML=d.market.symbols.map(s=>`<tr>
@@ -249,6 +589,25 @@ function render(d){
       <td><div class="bar"><i style="width:${Math.round((s.confidence||0)*100)}%"></i></div><span class="mini">${(s.confidence*100).toFixed(0)}%</span></td>
       <td>${s.rsi??'—'}</td><td class="mut">${target}</td></tr>`;
   }).join("");
+
+  // extreme volatility radar
+  const vol = d.volatility || {};
+  const volRows = Object.entries(vol).map(([sym,v])=>{
+    if(!v || !v.ready) return `<tr><td>${sym}</td><td colspan="7" class="mut">warming up…</td></tr>`;
+    const r=(v.regime||'unknown').toLowerCase();
+    const likeColor = v.extremeMoveLikelihoodPct>=70?'neg':(v.extremeMoveLikelihoodPct>=40?'':'pos');
+    return `<tr>
+      <td>${sym}</td>
+      <td><span class="tag t-${r}">${v.regime}</span></td>
+      <td>${v.percentile!=null?v.percentile+'th':'—'} <span class="mini mut">(z ${v.zScore??'—'})</span></td>
+      <td>${v.ewmaVolPct!=null?v.ewmaVolPct+'%':'—'}</td>
+      <td class="mini">${v.expectedMove?.oneSigmaPct??'—'}% / ${v.expectedMove?.twoSigmaPct??'—'}%</td>
+      <td><div class="vbar"><i style="width:${Math.round(v.extremeMoveLikelihoodPct||0)}%"></i></div> <span class="${likeColor}">${v.extremeMoveLikelihoodPct}%</span></td>
+      <td>${v.squeeze?'<span class="tag t-elevated">SQUEEZE</span>':'<span class="mut mini">—</span>'}</td>
+      <td class="mini mut">${(v.reasons||[]).join('; ')}</td>
+    </tr>`;
+  }).join("");
+  $("volatility").innerHTML = volRows || `<tr><td colspan="8" class="mut">Warming up…</td></tr>`;
 
   // positions
   $("positions").innerHTML = p.positions.length? p.positions.map(x=>`<tr>
@@ -312,6 +671,16 @@ function render(d){
     <td class="${f.side==='BUY'?'pos':'neg'}">${f.side}</td>
     <td>${f.symbol}</td><td>${money(f.notional)}</td><td>${shortP(f.price)}</td></tr>`).join("")
     : `<tr><td colspan="6" class="mut">No fills yet.</td></tr>`;
+
+  // chronicle
+  $("chronicle-rows").innerHTML = (d.chronicle||[]).length ? (d.chronicle||[]).map(c=>`<tr>
+    <td class="mini">${new Date(c.ts).toLocaleTimeString()}</td>
+    <td>${c.cycle}</td>
+    <td class="mini">${c.dataSource}</td>
+    <td>${money(c.equity)}</td>
+    <td>${c.actionCount}</td>
+    <td class="mini">${c.topSignal?`${c.topSignal.symbol} ${c.topSignal.signal} (${c.topSignal.score})`:'—'}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="mut">No chronicle entries yet.</td></tr>`;
 
   // alerts
   const al=d.alerts||{};
@@ -419,6 +788,7 @@ async function runOptimize(){
       <td class="neg">-${t.maxDrawdownPct}%</td><td>${t.sharpe}</td><td>${t.trades}</td>
       <td class="mini">${Object.entries(t.params).map(([k,v])=>k+'='+v).join(' · ')}</td></tr>`).join("");
     $("opt-body").innerHTML=`<table><thead><tr><th>#</th><th>Fitness</th><th>Return</th><th>MaxDD</th><th>Sharpe</th><th>Trades</th><th>Params</th></tr></thead><tbody>${rows}</tbody></table>`;
+    loadParams();
   }catch(e){$("opt-status").innerHTML=`<span class="neg">${e.message}</span>`;}
 }
 async function runWalkForward(){
@@ -440,6 +810,388 @@ async function runWalkForward(){
     $("opt-body").innerHTML=`<table><thead><tr><th>Fold</th><th>OOS Return</th><th>OOS MaxDD</th><th>Sharpe</th><th>Trades</th><th>Best Params (in-sample)</th></tr></thead><tbody>${rows}</tbody></table>`;
   }catch(e){$("opt-status").innerHTML=`<span class="neg">${e.message}</span>`;}
 }
+
+// ---- Saved params ----
+async function loadParams(){
+  $("params-body").innerHTML = `<span class="mut">loading…</span>`;
+  try{
+    const r=await fetch('/api/params'); const d=await r.json();
+    const active = Object.entries(d.active||{}).map(([k,v])=>`<div class="mini"><b>${k}</b>: ${JSON.stringify(v)}</div>`).join("") || `<div class="mini mut">none active</div>`;
+    const stored = Object.entries(d.stored||{}).map(([k,v])=>`<div class="mini"><b>${k}</b>: ${JSON.stringify(v.params||v)} <span class="mut">${v.source?('· '+v.source):''}</span></div>`).join("") || `<div class="mini mut">no saved params yet — run a Grid Search</div>`;
+    $("params-body").innerHTML = `<div class="mini mut" style="margin-bottom:4px">ACTIVE (applied to the live engine)</div>${active}<div class="divider"></div><div class="mini mut" style="margin-bottom:4px">SAVED STORE</div>${stored}`;
+  }catch(e){$("params-body").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- Stage 2 cold-start synthetic validator ----
+async function runValidator(runs){
+  $("val-status").innerHTML=`Running ${runs} block-bootstrap synthetic paths…`;
+  $("val-body").innerHTML="";
+  try{
+    const r=await fetch('/api/validate/synthetic',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runs,bars:400})});
+    const d=await r.json();
+    if(d.error){$("val-status").innerHTML=`<span class="neg">${d.error}</span>`;return;}
+    $("val-status").innerHTML = d.note;
+    const sd = d.sortinoDistribution||{};
+    const m=(label,val,c)=>`<div><div class="mini">${label}</div><div class="kpi small ${c||''}">${val}</div></div>`;
+    $("val-body").innerHTML = `<div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:10px">`+
+      m('Autonomous Eligible', d.autonomousEligible?'YES':'NO', d.autonomousEligible?'pos':'neg')+
+      m('Pass Rate', d.passRate+'%', d.passRate>=d.passRateThreshold*100?'pos':'neg')+
+      m('Valid Runs', d.validRuns)+
+      m('Sortino min/mean/max', `${sd.min??'—'} / ${sd.mean??'—'} / ${sd.max??'—'}`)+
+      `</div><div class="mini">Method: ${d.method}</div>`;
+  }catch(e){$("val-status").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- DNFH ----
+async function scanDnfh(){
+  $("dnfh-status").innerHTML=`Scanning HyperLiquid funding rates…`;
+  $("dnfh-rows").innerHTML=`<tr><td colspan="7" class="mut">Scanning…</td></tr>`;
+  try{
+    const r=await fetch('/api/dnfh/scan'); const d=await r.json();
+    if(d.error){$("dnfh-status").innerHTML=`<span class="neg">${d.error}</span>`;$("dnfh-rows").innerHTML="";return;}
+    $("dnfh-status").innerHTML = `Entry bar: <b>${d.entryThresholdAnnualPct}%</b> annualized · ${d.opportunities.length} positive-funding symbols found. <span class="mini">${d.note}</span>`;
+    $("dnfh-rows").innerHTML = d.opportunities.length ? d.opportunities.map(o=>`<tr>
+      <td>${o.symbol}</td>
+      <td>${fmt(o.fundingHourlyPct,4)}%</td>
+      <td class="${o.meetsEntryThreshold?'pos':'mut'}">${fmt(o.annualizedFundingPct,1)}%</td>
+      <td>${shortP(o.markPx)}</td>
+      <td>${money(o.openInterestUsd)}</td>
+      <td>${o.meetsEntryThreshold?'<span class="tag t-approved">YES</span>':'<span class="tag t-rejected">no</span>'}</td>
+      <td>${o.meetsEntryThreshold?`<button class="mini-btn" onclick="planDnfh('${o.symbol}')">Plan</button>`:'<span class="mut mini">below bar</span>'}</td>
+    </tr>`).join("") : `<tr><td colspan="7" class="mut">No positive-funding opportunities right now.</td></tr>`;
+  }catch(e){$("dnfh-status").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+async function planDnfh(symbol){
+  const spotTokenAddress = prompt(`Planning ${symbol}: paste the VERIFIED spot token contract address on Base (this module refuses to guess it for you):`);
+  if(!spotTokenAddress) return;
+  const usdNotional = Number(prompt('USD notional to plan for:', '500')||0);
+  if(!(usdNotional>0)) return;
+  $("dnfh-plan-result").innerHTML = `Planning ${symbol}…`;
+  try{
+    const r=await fetch('/api/dnfh/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,usdNotional,spotTokenAddress})});
+    const d=await r.json();
+    if(d.error){$("dnfh-plan-result").innerHTML=`<span class="neg">Plan refused: ${d.error}</span>`;return;}
+    $("dnfh-plan-result").innerHTML = `<span class="pos">PLAN (not executed):</span> ${symbol} · leverage ${d.leverage}x · net edge/7d: ${fmt(d.netEdge7dPct,2)}% <span class="mini">— this computes the hypothetical legs only; POST /api/dnfh/execute is required (and fully live-gated) to actually move funds, and is intentionally not a dashboard button.</span>`;
+  }catch(e){$("dnfh-plan-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- AVSS ----
+async function scanAvss(){
+  $("avss-status").innerHTML=`Scanning cross-venue lag + flow + net-opportunity…`;
+  $("avss-rows").innerHTML=`<tr><td colspan="6" class="mut">Scanning…</td></tr>`;
+  try{
+    const r=await fetch('/api/avss/scan'); const d=await r.json();
+    if(d.error){$("avss-status").innerHTML=`<span class="neg">${d.error}</span>`;$("avss-rows").innerHTML="";return;}
+    $("avss-status").innerHTML = `${d.candidates.length} symbols scanned. <span class="mini">${d.note}</span>`;
+    $("avss-rows").innerHTML = d.candidates.length ? d.candidates.map(c=>{
+      const no = c.netOpportunity||{};
+      return `<tr>
+        <td>${c.symbol}</td>
+        <td class="${c.lagTriggered?'pos':'mut'}">${fmt(c.lagBps,1)}</td>
+        <td class="${c.flowTriggered?'pos':'mut'}">${c.flowZProxy??'—'}</td>
+        <td>${no.netBps!=null?fmt(no.netBps,1)+' bps':'—'} ${no.approved!=null?(no.approved?'<span class="tag t-approved">OK</span>':'<span class="tag t-rejected">no</span>'):''}</td>
+        <td class="mini">${c.direction||'—'}</td>
+        <td>${c.triggered?'<span class="tag t-long">TRIGGERED</span>':'<span class="tag t-flat">quiet</span>'}</td>
+      </tr>`;
+    }).join("") : `<tr><td colspan="6" class="mut">No symbols scanned.</td></tr>`;
+  }catch(e){$("avss-status").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- Capital Ring ----
+async function loadCapitalRing(){
+  const targets = [$("capital-ring-overview"), $("capital-ring-detail")].filter(Boolean);
+  targets.forEach(t=>t.innerHTML = `<span class="mut">loading…</span>`);
+  try{
+    const r=await fetch('/api/capital-ring'); const d=await r.json();
+    if(d.error){targets.forEach(t=>t.innerHTML=`<span class="neg">${d.error}</span>`);return;}
+    if(!d.enabled){
+      targets.forEach(t=>t.innerHTML = `<span class="mut">Capital Ring disabled — engine runs a single unified allocator. Set CAPITAL_RING_ENABLED=true to split into Shield/Spear pools.</span>`);
+      return;
+    }
+    const pools = d.lastPools || {};
+    const shieldSyms = Object.keys(pools.shield||pools.shieldTargets||{}).length;
+    const spearSyms = Object.keys(pools.spear||pools.spearTargets||{}).length;
+    const sr = d.lastSpearRisk || {};
+    const html = `
+      <div class="formrow" style="margin:0 0 10px">
+        <div><div class="mini">Shield</div><div class="kpi small">${(d.shieldPct*100).toFixed(0)}%</div></div>
+        <div><div class="mini">Spear</div><div class="kpi small">${(d.spearPct*100).toFixed(0)}%</div></div>
+        <div><div class="mini">Spear strategies</div><div class="mini">${(d.spearStrategies||[]).join(', ')||'—'}</div></div>
+      </div>
+      <div class="mini">Shield pool: ${shieldSyms} routed symbol(s) · Spear pool: ${spearSyms} routed symbol(s)</div>
+      <div class="mini" style="margin-top:6px">Spear daily loss: ${d.spearHalted?'<span class="neg">HALTED</span>':'<span class="pos">clear</span>'} ${sr.dailyLossPct!=null?`(${fmt(sr.dailyLossPct*100,1)}% of ceiling)`:''} ${d.spearHaltUntil?`<span class="mini mut">clears ${new Date(d.spearHaltUntil).toLocaleString()}</span>`:''}</div>
+    `;
+    targets.forEach(t=>t.innerHTML = html);
+  }catch(e){targets.forEach(t=>t.innerHTML=`<span class="neg">${e.message}</span>`);}
+}
+
+// ---- OFI (Order Flow Imbalance) ----
+async function pollOFI(){
+  const symbol = $("ofi-symbol").value;
+  const levels = Number($("ofi-levels").value)||10;
+  if(!symbol) return;
+  $("ofi-result").innerHTML = `Polling ${symbol} order book…`;
+  try{
+    const r=await fetch(`/api/market/orderflow?symbol=${encodeURIComponent(symbol)}&levels=${levels}`);
+    const d=await r.json();
+    if(d.error){$("ofi-result").innerHTML=`<span class="neg">${d.error}</span>`;return;}
+    if(!d.ofi){
+      $("ofi-result").innerHTML = `<span class="mut">Snapshot ${d.snapshots}/2 captured — need one more poll a few seconds apart to compute a delta.</span> <button class="mini-btn" onclick="setTimeout(pollOFI,2500)">Retry in 2.5s</button>`;
+      return;
+    }
+    const o=d.ofi;
+    const biasCls = o.bias==='BUY_PRESSURE'?'pos':(o.bias==='SELL_PRESSURE'?'neg':'mut');
+    $("ofi-result").innerHTML = `
+      <div class="kpi small ${biasCls}">${o.bias}</div>
+      <div class="mini" style="margin-top:4px">Normalized OFI: ${o.normalizedOFI} · raw OFI: ${o.ofi} · bid contrib ${o.bidOFI} · ask contrib ${o.askOFI}</div>
+      <div class="mini">Levels: ${o.levels} · window: ${(o.windowMs/1000).toFixed(1)}s between polls</div>
+    `;
+  }catch(e){$("ofi-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- Kalman pairs ----
+async function computeKalman(){
+  const x=$("kalman-x").value, y=$("kalman-y").value;
+  if(!x||!y) return;
+  if(x===y){$("kalman-result").innerHTML=`<span class="neg">Pick two different symbols.</span>`;return;}
+  $("kalman-result").innerHTML = `Computing Kalman filter for ${x}/${y}…`;
+  try{
+    const r=await fetch(`/api/signals/kalman-pairs?x=${encodeURIComponent(x)}&y=${encodeURIComponent(y)}`);
+    const d=await r.json();
+    if(d.error){$("kalman-result").innerHTML=`<span class="neg">${d.error}</span>`;return;}
+    if(!d.ready){$("kalman-result").innerHTML=`<span class="mut">${d.reason||'not enough paired history yet'}</span>`;return;}
+    const sigCls = d.signal==='FLAT'?'mut':(d.signal==='LONG_Y_SHORT_X'?'pos':'neg');
+    $("kalman-result").innerHTML = `
+      <div class="kpi small ${sigCls}">${d.signal}</div>
+      <div class="mini" style="margin-top:4px">beta (hedge ratio): ${d.beta} · spread: ${d.spread} (mean ${d.spreadMean}, σ ${d.spreadStdev})</div>
+      <div class="mini">z-score: ${d.zScore} (entry threshold ±${d.zEntryThreshold})</div>
+      <div class="mini" style="margin-top:4px;color:var(--muted)">${d.note}</div>
+    `;
+  }catch(e){$("kalman-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- MEV assessment ----
+async function assessMev(){
+  const chain=$("mev-chain").value, tokenAddress=$("mev-token").value.trim(), usd=Number($("mev-usd").value)||0;
+  if(!tokenAddress){$("mev-result").innerHTML=`<span class="neg">Paste a token address first.</span>`;return;}
+  $("mev-result").innerHTML = `Assessing…`;
+  try{
+    const r=await fetch('/api/wallet/assess',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain,tokenAddress,usd})});
+    const d=await r.json();
+    if(d.error){$("mev-result").innerHTML=`<span class="neg">${d.error}</span>`;return;}
+    const lvlCls = d.risk.level==='HIGH'?'neg':(d.risk.level==='MEDIUM'?'warn-txt':'pos');
+    $("mev-result").innerHTML = `
+      <div class="kpi small ${lvlCls}">${d.risk.level} RISK</div>
+      <div class="mini" style="margin-top:4px">${(d.risk.reasons||[]).join(' · ')}</div>
+      <div class="mini" style="margin-top:4px">Plan: ${d.plan.chunks} chunk(s) of ~$${d.plan.chunkUsd||((usd/d.plan.chunks).toFixed(2))} each${d.plan.useProtectedRelay?' · routed via protected relay':''}</div>
+    `;
+  }catch(e){$("mev-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- DNFH rebalance-check ----
+async function checkDnfhRebalance(){
+  const symbol=$("dnfh-rebal-symbol").value.trim().toUpperCase();
+  const spotPx=$("dnfh-rebal-spot").value, perpPx=$("dnfh-rebal-perp").value;
+  if(!symbol||!spotPx||!perpPx){$("dnfh-rebal-result").innerHTML=`<span class="neg">symbol, spot px and perp px are all required.</span>`;return;}
+  $("dnfh-rebal-result").innerHTML=`Checking…`;
+  try{
+    const r=await fetch(`/api/dnfh/rebalance-check?symbol=${encodeURIComponent(symbol)}&spotPx=${spotPx}&perpPx=${perpPx}`);
+    const d=await r.json();
+    if(d.error){$("dnfh-rebal-result").innerHTML=`<span class="neg">${d.error}</span>`;return;}
+    $("dnfh-rebal-result").innerHTML = `<span class="${d.shouldRebalance?'warn-txt':'pos'}">${d.shouldRebalance?'REBALANCE SUGGESTED':'no rebalance needed'}</span>`+
+      (d.reasons&&d.reasons.length?` — ${d.reasons.join('; ')}`:'');
+  }catch(e){$("dnfh-rebal-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- Wallet: browser connect + manual address lookup (public address ONLY) ----
+function renderConnectedWallet(label, address, result){
+  const el=$("connected-wallets");
+  const bal = result?.balances?.map(b=>`${b.asset}: ${Number(b.free).toLocaleString(undefined,{maximumFractionDigits:6})}`).join(' · ') || (result?.error||'no balance data');
+  const div=document.createElement('div');
+  div.innerHTML=`<div class="formrow" style="margin:4px 0"><b>${label}</b> <span class="mini mut">${address}</span></div><div class="mini" style="margin:0 0 8px">${bal}</div>`;
+  el.prepend(div);
+}
+async function connectInjectedEvm(){
+  if(!window.ethereum){alert('No injected EVM wallet found. Install MetaMask, Coinbase Wallet, or Trust Wallet.');return;}
+  try{
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const address = accounts[0];
+    const r = await fetch('/api/wallet/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain:'ethereum',address})});
+    const result = await r.json();
+    renderConnectedWallet('EVM wallet (Ethereum shown; same address works on Base/BNB)', address, result);
+  }catch(e){alert('Connect failed/rejected: '+e.message);}
+}
+async function connectPhantom(){
+  if(!window.solana || !window.solana.isPhantom){alert('Phantom not found. Install the Phantom extension.');return;}
+  try{
+    const resp = await window.solana.connect();
+    const address = resp.publicKey.toString();
+    const r = await fetch('/api/wallet/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain:'solana',address})});
+    const result = await r.json();
+    renderConnectedWallet('Phantom (Solana)', address, result);
+  }catch(e){alert('Connect failed/rejected: '+e.message);}
+}
+async function lookupManualWallet(){
+  const chain=$("manual-chain").value;
+  const address=($("manual-address").value||'').trim();
+  if(!address){alert('Paste a public address first.');return;}
+  try{
+    const r = await fetch('/api/wallet/lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain,address})});
+    const result = await r.json();
+    renderConnectedWallet(chain, address, result);
+  }catch(e){alert('Lookup failed: '+e.message);}
+}
+
+// ---- Exchange balances + key management (read+trade scoped keys only) ----
+const VENUE_META={coinbase:{needsPass:true},kraken:{needsPass:false},binanceus:{needsPass:false}};
+async function loadExchangeBalances(){
+  $("venues-mgmt").innerHTML = `<span class="mut">loading…</span>`;
+  try{
+    const [all,health] = await Promise.all([
+      fetch('/api/exchanges/balances/all').then(r=>r.json()),
+      fetch('/api/exchanges/health').then(r=>r.json()),
+    ]);
+    const fees = all.fees||{};
+    $("venues-mgmt").innerHTML = Object.keys(VENUE_META).map(name=>{
+      const v = (all.venues||{})[name] || {};
+      const h = health[name] || {};
+      const connected = v.note !== "no API keys configured" && !v.error;
+      const f = fees[name];
+      const feeTxt = f ? `${f.label||name}: ${f.maker}% / ${f.taker}% (maker/taker)` : '';
+      const balRows = (v.balances||[]).filter(b=>Number(b.free)>0||Number(b.total)>0).slice(0,8)
+        .map(b=>`<span class="flag">${b.asset} ${fmt(b.free??b.total,4)}</span>`).join(' ') || '<span class="mut mini">no balances (or no keys)</span>';
+      return `<div class="formrow" style="align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:10px">
+        <div style="min-width:90px"><b>${name}</b>${name===health.primary?' <span class="mini mut">(primary)</span>':''}</div>
+        <div>
+          <div class="mini">${connected?'<span class="pos">🔑 keys saved</span>':'<span class="mut">no keys</span>'} · ${h.reachable?'<span class="pos">✓ reachable</span>':'<span class="warn-txt">⚠ unreachable</span>'} <span class="mut">${feeTxt}</span></div>
+          <div style="margin:6px 0">${balRows}</div>
+          <div class="formrow" style="margin:4px 0">
+            <input id="k-${name}" class="mini-input" placeholder="API key" autocomplete="off">
+            <input id="s-${name}" class="mini-input" placeholder="API secret" type="password" autocomplete="off">
+            ${VENUE_META[name].needsPass?`<input id="p-${name}" class="mini-input" placeholder="passphrase" type="password" autocomplete="off">`:''}
+            <button class="mini-btn go" onclick="connectVenue('${name}')">Save &amp; verify</button>
+            ${connected?`<button class="mini-btn danger" onclick="disconnectVenue('${name}')">Disconnect</button>`:''}
+          </div>
+          <div class="mini" id="venue-res-${name}"></div>
+        </div>
+      </div>`;
+    }).join("");
+  }catch(e){$("venues-mgmt").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+async function connectVenue(name){
+  const body={venue:name, key:$("k-"+name).value.trim(), secret:$("s-"+name).value.trim()};
+  if(VENUE_META[name].needsPass) body.passphrase=($("p-"+name).value||'').trim();
+  $("venue-res-"+name).innerHTML=`Saving &amp; verifying…`;
+  try{
+    const r=await fetch('/api/exchanges/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    $("venue-res-"+name).innerHTML = d.error? `<span class="neg">⚠ ${d.error}</span>` : `<span class="pos">✓ saved — reachable=${d.reachable} balancesOk=${d.balancesOk}</span>${d.error?(' — '+d.error):''}`;
+    loadExchangeBalances();
+  }catch(e){$("venue-res-"+name).innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+async function disconnectVenue(name){
+  if(!confirm(`Disconnect ${name}? This removes its saved keys.`))return;
+  try{ await fetch('/api/exchanges/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({venue:name})}); loadExchangeBalances(); }catch(e){alert(e.message);}
+}
+
+// ---- Live trading arm/disarm + engine start/stop ----
+async function loadLive(){
+  try{
+    const r=await fetch('/api/live/status'); const s=await r.json();
+    const armed = s.canTradeLive;
+    $("live-card").style.borderColor = armed ? 'rgba(255,77,109,.7)' : 'var(--line)';
+    $("live-status").innerHTML = `
+      <span class="tag ${armed?'t-rejected':'t-approved'}">${armed?'🔴 LIVE — REAL ORDERS':'🟢 PAPER (safe)'}</span>
+      <span class="mini"> · ${s.primary} ${s.primaryConnected?'connected':'not connected'} · ${s.useTestnet?'TESTNET':'real markets'} · ${s.authEnabled?'password set':'⚠ no dashboard password'}</span>
+      ${s.armedAt?`<div class="mini">armed ${new Date(s.armedAt).toLocaleString()}</div>`:''}
+    `;
+    if(armed){
+      $("live-controls").innerHTML = `<button class="mini-btn danger" style="font-size:13px;padding:8px 16px" onclick="disarmLive()">■ DISARM — stop live trading now</button>`;
+    } else {
+      $("live-controls").innerHTML = `
+        <div class="mini" style="margin-bottom:6px">To arm, type the exact phrase <code>I ACCEPT THE RISK</code>:</div>
+        <div class="formrow">
+          <input id="arm-phrase" class="mini-input" style="width:220px" placeholder="I ACCEPT THE RISK" autocomplete="off">
+          <button class="mini-btn danger" onclick="armLive()">⚡ Arm live trading</button>
+        </div>`;
+    }
+  }catch(e){$("live-status").innerHTML=`<span class="neg">${e.message}</span>`;}
+  try{
+    const r2=await fetch('/api/state'); const d2=await r2.json();
+    $("engine-run-state").innerHTML = d2.running? '<span class="pos">RUNNING</span>' : '<span class="mut">STOPPED</span>';
+  }catch(_){}
+}
+async function armLive(){
+  const confirmPhrase = ($("arm-phrase").value||'').trim();
+  if(!confirm('This will place REAL orders with REAL money. Continue?'))return;
+  $("live-result").innerHTML = `Arming…`;
+  try{
+    const r=await fetch('/api/live/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:confirmPhrase})});
+    const d=await r.json();
+    if(d.error){$("live-result").innerHTML=`<span class="neg">⚠ ${d.error}</span>`;}
+    else{
+      $("live-result").innerHTML = `<span class="pos">✅ Live trading ARMED.</span>`;
+      if(d.warnings&&d.warnings.length){$("live-warnbox").style.display='block';$("live-warnbox").innerHTML='⚠ '+d.warnings.join('<br>⚠ ');}
+    }
+  }catch(e){$("live-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+  loadLive();
+}
+async function disarmLive(){
+  $("live-result").innerHTML = `Disarming…`;
+  try{ await fetch('/api/live/disarm',{method:'POST'}); $("live-result").innerHTML=`🟢 Disarmed — back to safe PAPER mode.`; $("live-warnbox").style.display='none'; }catch(e){$("live-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+  loadLive();
+}
+async function engineControl(action){
+  try{ await fetch(`/api/engine/${action}`,{method:'POST'}); loadLive(); }catch(e){alert(e.message);}
+}
+
+// ---- Journal & analytics ----
+async function loadAnalytics(){
+  $("analytics-kpis").innerHTML = `<span class="mut">loading…</span>`;
+  try{
+    const r=await fetch('/api/analytics'); const d=await r.json();
+    const m=(label,val,c)=>`<div><div class="mini">${label}</div><div class="kpi small ${c||''}">${val}</div></div>`;
+    $("analytics-kpis").innerHTML =
+      m('Total Trades', d.totalTrades)+
+      m('Win Rate', d.winRatePct+'%', d.winRatePct>=50?'pos':'neg')+
+      m('Net PnL', money(d.netPnl), cls(d.netPnl))+
+      m('Profit Factor', d.profitFactor??'∞')+
+      m('Expectancy', money(d.expectancy), cls(d.expectancy))+
+      m('Avg Win / Loss', `${money(d.avgWin)} / -${money(d.avgLoss)}`)+
+      m('Max Drawdown', '-'+d.maxDrawdownPct+'%', 'neg')+
+      m('Avg Hold', d.avgHoldMinutes+'m');
+    const symRows = (d.symbolStats||[]).map(s=>`<div class="mini">${s.symbol}: ${s.trades} trades · win ${s.winRatePct}% · pnl <span class="${cls(s.pnl)}">${money(s.pnl)}</span></div>`).join("") || `<div class="mini mut">no closed trades yet</div>`;
+    $("analytics-symbols").innerHTML = `<div class="mini mut" style="margin-bottom:4px">PER-SYMBOL</div>${symRows}`;
+    // journal table from the same recentTrades the analytics endpoint already computed
+    $("journal-rows").innerHTML = (d.recentTrades||[]).length ? d.recentTrades.map(t=>`<tr>
+      <td class="mini">${new Date(t.ts).toLocaleString()}</td>
+      <td>${t.symbol}</td><td class="mut">LONG</td>
+      <td>${shortP(t.entryPrice)}</td><td>${shortP(t.exitPrice)}</td>
+      <td class="${cls(t.pnl)}">${money(t.pnl)}</td>
+      <td class="${cls(t.pnlPct)}">${pct(t.pnlPct)}</td>
+      <td class="mini">${t.holdMs?(t.holdMs/60000).toFixed(1)+'m':'—'}</td></tr>`).join("")
+      : `<tr><td colspan="8" class="mut">No closed trades yet.</td></tr>`;
+  }catch(e){$("analytics-kpis").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
+// ---- HyperLiquid manual order ----
+async function placeHlOrder(){
+  const symbol=$("hl-symbol").value.trim().toUpperCase();
+  const side=$("hl-side").value;
+  const quantity=Number($("hl-qty").value);
+  const limitPrice=Number($("hl-price").value);
+  const reduceOnly=$("hl-reduceonly").checked;
+  if(!symbol||!quantity||!limitPrice){$("hl-result").innerHTML=`<span class="neg">symbol, quantity and limit price are required.</span>`;return;}
+  if(!confirm(`Place a ${side} ${quantity} ${symbol} @ ${limitPrice} limit order on HyperLiquid?${reduceOnly?' (reduce-only)':''} This uses the normal live-arm gate.`))return;
+  $("hl-result").innerHTML = `Submitting…`;
+  try{
+    const r=await fetch('/api/hyperliquid/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,side,quantity,limitPrice,reduceOnly})});
+    const d=await r.json();
+    if(d.error){$("hl-result").innerHTML=`<span class="neg">${d.error}</span>`;return;}
+    $("hl-result").innerHTML = `<span class="pos">Order result:</span> ${JSON.stringify(d)}`;
+  }catch(e){$("hl-result").innerHTML=`<span class="neg">${e.message}</span>`;}
+}
+
 async function testAlert(){
   try{const r=await fetch('/api/alerts/test',{method:'POST'});const d=await r.json();
     alert(d.sent?('Test alert sent: '+JSON.stringify(d.results)):('Not sent: '+(d.reason||d.error)));
@@ -467,6 +1219,7 @@ function guardedFetch(url,opts){
   return fetch(url,opts).then(r=>{if(r.status===401){location.href='/login.html';throw new Error('unauthorized');}return r;});
 }
 // initial fetch then live stream
+initTabs();
 guardedFetch('/api/state').then(r=>r.json()).then(render).catch(()=>{});
 connect();
 window.addEventListener('resize',()=>{fetch('/api/state').then(r=>r.json()).then(render).catch(()=>{});});
@@ -487,6 +1240,23 @@ async function refreshLivePill(){
   }catch(_){}
 }
 refreshLivePill();setInterval(refreshLivePill,7000);
+// Lazily load on-demand panels the first time their tab is shown.
+const __lazyLoaded = {};
+window.addEventListener('saint-tab-shown', (e)=>{
+  const tab = e.detail;
+  if(__lazyLoaded[tab]) return;
+  __lazyLoaded[tab]=true;
+  if(tab==='yield'){ scanDnfh(); scanAvss(); loadCapitalRing(); }
+  if(tab==='overview'){ loadCapitalRing(); }
+  if(tab==='lab'){ loadParams(); }
+  if(tab==='exchanges'){ loadLive(); loadExchangeBalances(); }
+  if(tab==='journal'){ loadAnalytics(); }
+});
+// Overview's Capital Ring card loads once on initial boot too.
+setTimeout(()=>loadCapitalRing(), 1200);
+// Live-control status needs to stay fresh even when its tab isn't open,
+// since arming/disarming can happen from /connect.html in another tab too.
+setInterval(()=>{ if(document.querySelector('.navitem[data-tab="exchanges"]').classList.contains('active')) loadLive(); }, 8000);
 </script>
 </body>
 </html>

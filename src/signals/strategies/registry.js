@@ -7,10 +7,16 @@
 
 const momentum = require("./momentum");
 const meanReversion = require("./meanReversion");
+const marketMaking = require("./marketMaking");
+const fibonacci = require("./fibonacci");
+const placeholders = require("./placeholders");
 
 const STRATEGIES = {
   momentum,
   meanreversion: meanReversion,
+  marketmaking: marketMaking,
+  fibonacci,
+  ...placeholders.STRATEGIES,
 };
 
 function get(name) {
@@ -22,13 +28,14 @@ function list() {
     name: s.name,
     label: s.label,
     params: s.defaultParams,
+    status: s.status || "active",
   }));
 }
 
 /**
  * Blend several strategies by averaging their directional scores.
  * @param {number[]} prices
- * @param {object} opts { members: string[], weights?: {name:weight}, params?: {name:params} }
+ * @param {object} opts { members: string[], weights?: {name:weight}, params?: {name:params}, context?: object }
  */
 function ensemble(prices, opts = {}) {
   const members = (opts.members && opts.members.length ? opts.members : ["momentum", "meanreversion"])
@@ -46,7 +53,7 @@ function ensemble(prices, opts = {}) {
 
   for (const m of members) {
     const w = weights[m.name] != null ? weights[m.name] : 1;
-    const r = m.evaluate(prices, perParams[m.name]);
+    const r = m.evaluate(prices, perParams[m.name], opts.context || {});
     parts[m.name] = { signal: r.signal, score: Number(r.score.toFixed(3)), confidence: Number(r.confidence.toFixed(3)) };
     scoreSum += r.score * w;
     confSum += r.confidence * w;
@@ -65,3 +72,4 @@ function ensemble(prices, opts = {}) {
 }
 
 module.exports = { STRATEGIES, get, list, ensemble };
+

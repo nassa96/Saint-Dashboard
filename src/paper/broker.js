@@ -118,7 +118,7 @@ class PaperBroker {
   }
 
   /** Execute a market order. side: BUY|SELL, notional in quote currency. */
-  execute({ symbol, side, notional, price }) {
+  execute({ symbol, side, notional, price, tag }) {
     if (!price || notional <= 0) return null;
     const slip = side === "BUY" ? 1 + this.slippageRate : 1 - this.slippageRate;
     const fillPrice = price * slip;
@@ -134,7 +134,13 @@ class PaperBroker {
       }
       const newQty = pos.qty + qty;
       pos.avgPrice = newQty > 0 ? (pos.avgPrice * pos.qty + fillPrice * qty) / newQty : fillPrice;
-      if (pos.qty <= 1e-10) pos.openedTs = Date.now(); // new position opened
+      if (pos.qty <= 1e-10) {
+        pos.openedTs = Date.now(); // new position opened
+        // Tag used only for the AWP Capital Ring's scoped spear-pool daily
+        // loss tracking — purely informational bookkeeping, no effect on
+        // cash/PnL math. Not re-tagged on scale-ins to an existing position.
+        if (tag) pos.tag = tag;
+      }
       pos.qty = newQty;
       this.cash -= notional + fee;
     } else {
@@ -159,6 +165,7 @@ class PaperBroker {
         fee: Number(fee.toFixed(4)),
         openedTs,
         holdMs: Date.now() - openedTs,
+        tag: pos.tag || tag || null,
       };
       this.trades.push(trade);
       if (this.trades.length > 1000) this.trades.shift();

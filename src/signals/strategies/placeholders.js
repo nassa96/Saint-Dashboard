@@ -40,11 +40,28 @@ const STRATEGIES = {
     "DNFH.md",
     "DNFH is implemented as a real cross-venue strategy, not a per-symbol signal — see src/yield/dnfh.js and /api/dnfh/scan|plan|execute"
   ),
-  overlord: inertStrategy("overlord", "Overlord Strategy (spec pending)", "OVERLORD.md"),
+  // Market Overlord spec: implemented, but spread across several existing
+  // modules rather than one per-symbol signal — see docs/strategies/OVERLORD.md
+  // for the map (marketMaking.js gamma scaling, dnfh.js entry/net-edge/
+  // rebalance rules, mevDefense.js). This slot stays inert for the same
+  // reason the dnfh slot does: it isn't a single-symbol directional signal.
+  overlord: inertStrategy(
+    "overlord",
+    "Market Overlord (implemented across modules — see docs/strategies/OVERLORD.md)",
+    "OVERLORD.md",
+    "Market Overlord is implemented as refinements to several existing modules, not a per-symbol signal — see docs/strategies/OVERLORD.md for the full map"
+  ),
+  // AWP: implemented across the fibonacci strategy (spear-pool entries),
+  // sortino.js (Kelly-Sortino sizing), capitalRing.js (Shield/Spear
+  // allocation), and riskManager.js (cold-start mode) — see
+  // docs/strategies/AUTONOMOUS_WEALTH_PROTOCOL.md. This slot stays inert
+  // because the real spear-pool signal lives in the "fibonacci" slot above;
+  // there's nothing left for this slot itself to compute.
   autonomouswealth: inertStrategy(
     "autonomouswealth",
-    "Autonomous Wealth Protocol — low-capital (spec pending)",
-    "AUTONOMOUS_WEALTH_PROTOCOL.md"
+    "Autonomous Wealth Protocol (implemented across modules — see docs/strategies/AUTONOMOUS_WEALTH_PROTOCOL.md)",
+    "AUTONOMOUS_WEALTH_PROTOCOL.md",
+    "AWP is implemented across fibonacci.js, sortino.js, capitalRing.js and riskManager.js — see docs/strategies/AUTONOMOUS_WEALTH_PROTOCOL.md for the full map; this slot itself has nothing to compute"
   ),
 };
 

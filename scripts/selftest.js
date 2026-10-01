@@ -6,6 +6,7 @@ const ind = require("../src/signals/indicators");
 const strategy = require("../src/signals/strategy");
 const RiskManager = require("../src/risk/riskManager");
 const Allocator = require("../src/portfolio/allocator");
+const CapitalRing = require("../src/portfolio/capitalRing");
 const PaperBroker = require("../src/paper/broker");
 const MemecoinScanner = require("../src/memecoin/scanner");
 const volatilityRadar = require("../src/volatility/predictor");
@@ -167,6 +168,36 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(sumWeights(riskOnTargets) <= sumWeights(neutralTargets) + 1e-9, "a >1.0 macro multiplier is clamped — it can never deploy MORE than the configured risk ceiling allows");
   ok("allocator macro overlay only ever throttles deployment, never exceeds the configured risk ceiling");
 
+  // AWP Capital Ring — Shield (80%)/Spear (20%) two-pool allocation on top
+  // of the existing per-symbol strategy router
+  const ringConfig = { ...config, capital: { ...config.capital, capitalRing: { enabled: true, shieldPct: 0.8, spearPct: 0.2, spearStrategies: ["fibonacci"] } } };
+  const ring = new CapitalRing(ringConfig);
+  assert(ring.isSpear("fibonacci") === true && ring.isSpear("momentum") === false, "capital ring classifies pools by routed strategy name");
+  const ringEvals = [
+    { symbol: "BTC-USD", strategy: "momentum", signal: "LONG", confidence: 0.8, score: 0.9 },
+    { symbol: "ETH-USD", strategy: "momentum", signal: "LONG", confidence: 0.8, score: 0.9 },
+    { symbol: "DOGE-USD", strategy: "fibonacci", signal: "LONG", confidence: 0.8, score: 0.9 },
+  ];
+  const ringResult = ring.computeTargets(ringEvals, {});
+  const shieldSum = (ringResult.targets["BTC-USD"] || 0) + (ringResult.targets["ETH-USD"] || 0);
+  const spearSum = ringResult.targets["DOGE-USD"] || 0;
+  assert(shieldSum > 0 && spearSum > 0, "both pools receive capital when both have qualifying LONG candidates");
+  assert(shieldSum <= config.capital.maxPortfolioRiskPct * 0.8 + 1e-9, "shield pool deployment never exceeds its 80% share of the risk budget");
+  assert(spearSum <= config.capital.maxPortfolioRiskPct * 0.2 + 1e-9, "spear pool deployment never exceeds its 20% share of the risk budget");
+  ok("Capital Ring splits deployment into an 80% shield / 20% spear pool by routed strategy, each independently capped");
+
+  // Spear pool's own scoped daily-loss ceiling halts NEW spear entries only
+  const spearPaper = {
+    trades: [{ tag: "spear", ts: Date.now(), pnl: -600 }], // big realized loss today, tagged spear
+    positions: {},
+  };
+  const spearRisk = ring.updateSpearRisk(spearPaper, 10000, {});
+  assert(spearRisk.halted === true, "spear pool halts new entries once its own scoped daily-loss ceiling is breached");
+  const ringAfterHalt = ring.computeTargets(ringEvals, {});
+  assert((ringAfterHalt.targets["DOGE-USD"] || 0) === 0, "halted spear pool receives zero NEW target allocation");
+  assert((ringAfterHalt.targets["BTC-USD"] || 0) > 0, "shield pool keeps trading normally while only the spear pool is halted");
+  ok("Capital Ring's spear-pool daily-loss ceiling halts spear-only trading without affecting the shield pool or the whole engine");
+
   // macro flow classification — pure logic, no network
   assert(macroFlow.classify(80, 2) === "RISK_ON", "high fear&greed + positive market-cap trend classifies RISK_ON");
   assert(macroFlow.classify(15, 1) === "RISK_OFF", "very low fear&greed (extreme fear) classifies RISK_OFF regardless of market-cap trend");
@@ -271,6 +302,19 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   const noSplitPlan = mevDefense.planExecution(50, lowRisk, { splitThresholdUsd: 250, maxChunks: 4 });
   assert(noSplitPlan.chunks === 1, "small + low-risk swap stays single-shot");
   ok("MEV defense assesses sandwich exposure from quote data + plans tranched execution");
+
+  // MEV defense — pre-broadcast abort (the realistic equivalent of
+  // "cancel before inclusion", since a public-mempool tx can't actually be
+  // un-sent) + priority-fee ceiling
+  const abortOnHighImpact = mevDefense.preBroadcastAbort(highRisk, {});
+  assert(abortOnHighImpact.abort === true, "pre-broadcast check aborts on HIGH quoted price impact");
+  const okImpactNoCongestion = mevDefense.preBroadcastAbort(lowRisk, { currentPriorityFeeGwei: 20, maxPriorityFeeGwei: 50 });
+  assert(okImpactNoCongestion.abort === false, "pre-broadcast check allows low-risk swaps under the priority-fee ceiling");
+  const abortOnCongestion = mevDefense.preBroadcastAbort(lowRisk, { currentPriorityFeeGwei: 80, maxPriorityFeeGwei: 50 });
+  assert(abortOnCongestion.abort === true, "pre-broadcast check aborts when current priority fee exceeds the configured ceiling, even on an otherwise low-risk swap");
+  const planWithCeiling = mevDefense.planExecution(1000, highRisk, { splitThresholdUsd: 250, maxChunks: 4, maxPriorityFeeGwei: 50 });
+  assert(planWithCeiling.maxPriorityFeeGwei === 50, "execution plan surfaces the configured priority-fee ceiling");
+  ok("MEV defense pre-broadcast abort refuses high-impact/congested swaps instead of claiming unrealistic in-flight mempool cancellation");
 
   // HyperLiquid — monitor-only safety contract: reads need no secret, perps
   // never enter the auto-rotation engine's venue pool.

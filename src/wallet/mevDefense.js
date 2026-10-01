@@ -17,6 +17,19 @@
    guarantee immunity. Thin-liquidity tokens (most memecoins) remain
    risky no matter what relay you use — the real defense there is
    smaller size and tighter slippage tolerance, both enforced below.
+
+   WHAT THIS DOES *NOT* DO (and why): a spec asking for "real-time
+   mempool monitoring + pre-inclusion cancellation" is not something this
+   (or any) tool can deliver once a transaction has actually been
+   broadcast to a PUBLIC mempool — there is no "cancel" for a transaction
+   other nodes already have; the only lever is replacing it with a
+   higher-gas/higher-nonce tx and hoping a miner/validator prefers your
+   replacement, which is unreliable and itself costs gas. The realistic,
+   honest equivalent implemented here is PRE-BROADCAST: assess risk and
+   abort (or re-route) BEFORE the tx ever reaches a public mempool —
+   via `preBroadcastAbort()` (toxic-flow/price-impact/priority-fee
+   ceiling checks) and `planExecution()`'s protected-relay routing
+   (Flashbots Protect-style: the tx skips the public mempool entirely).
    ============================================================ */
 
 const RISK_THRESHOLDS = {
@@ -87,6 +100,7 @@ function planExecution(usdNotional, riskAssessment, cfg = {}) {
     chunks,
     chunkUsd,
     useProtectedRelay,
+    maxPriorityFeeGwei: cfg.maxPriorityFeeGwei ?? null,
     delayMsBetweenChunks: cfg.chunkDelayMs ?? 4000,
     note: chunks > 1
       ? `splitting into ${chunks} tranches of ~$${chunkUsd} to shrink the target a sandwich bot sees per-tx`
@@ -94,4 +108,37 @@ function planExecution(usdNotional, riskAssessment, cfg = {}) {
   };
 }
 
-module.exports = { assessRisk, planExecution, riskLevelFromImpact, RISK_THRESHOLDS };
+/**
+ * Pre-broadcast abort check — the realistic equivalent of "cancel before
+ * inclusion" since a transaction can't actually be un-sent once it hits a
+ * public mempool. Runs BEFORE anything is signed/broadcast and refuses to
+ * proceed (or flags "route via protected relay instead") when:
+ *   - quoted price impact is HIGH (likely toxic/thin liquidity), or
+ *   - the current network priority fee exceeds the configured ceiling
+ *     (a congested/contentious mempool is exactly when sandwich bots are
+ *     most active and gas auctions get expensive/unpredictable).
+ * Pure decision logic — no network calls, no transaction signing.
+ */
+function preBroadcastAbort(riskAssessment, { currentPriorityFeeGwei, maxPriorityFeeGwei } = {}) {
+  const reasons = [];
+  let abort = false;
+
+  if (riskAssessment?.level === "HIGH") {
+    abort = true;
+    reasons.push("quoted price impact reads HIGH sandwich-exposure — aborting before broadcast rather than risking a toxic fill");
+  }
+
+  if (Number.isFinite(currentPriorityFeeGwei) && Number.isFinite(maxPriorityFeeGwei) && currentPriorityFeeGwei > maxPriorityFeeGwei) {
+    abort = true;
+    reasons.push(
+      `current priority fee ${currentPriorityFeeGwei} gwei exceeds the configured ceiling ${maxPriorityFeeGwei} gwei — ` +
+        "a congested/contentious mempool is exactly when sandwich bots are most active; aborting before broadcast"
+    );
+  }
+
+  if (!reasons.length) reasons.push("no pre-broadcast abort conditions triggered");
+
+  return { abort, reasons };
+}
+
+module.exports = { assessRisk, planExecution, preBroadcastAbort, riskLevelFromImpact, RISK_THRESHOLDS };

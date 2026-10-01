@@ -109,6 +109,21 @@ const config = {
     // breach happens late in the day. Matches the Market Overlord cold-start
     // spec's explicit "halts for 24 hours."
     haltCooldownHours: num(process.env.HALT_COOLDOWN_HOURS, 24),
+    // AWP Capital Ring: two-pool allocation on top of the existing
+    // per-symbol strategy router. Shield = conservative/low-vol strategies,
+    // capped at shieldPct of the risk budget. Spear = high-conviction
+    // momentum strategies (default: fibonacci), capped at spearPct, with
+    // its own scoped daily-loss ceiling that halts NEW spear entries only
+    // (never the whole engine) on breach. Disabled by default — the engine
+    // behaves exactly as before (single unified allocator) unless enabled.
+    capitalRing: {
+      enabled: bool(process.env.CAPITAL_RING_ENABLED, false),
+      shieldPct: num(process.env.CAPITAL_RING_SHIELD_PCT, 0.8),
+      spearPct: num(process.env.CAPITAL_RING_SPEAR_PCT, 0.2),
+      spearStrategies: list(process.env.CAPITAL_RING_SPEAR_STRATEGIES, ["fibonacci"]),
+      spearDailyLossCeilingPct: num(process.env.CAPITAL_RING_SPEAR_DAILY_LOSS_CEILING_PCT, 0.05),
+      spearHaltCooldownHours: num(process.env.CAPITAL_RING_SPEAR_HALT_COOLDOWN_HOURS, 24),
+    },
   },
 
   universe: list(process.env.TRADE_UNIVERSE, [

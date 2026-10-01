@@ -12,6 +12,7 @@ const strategy = require("../signals/strategy");
 const volatilityRadar = require("../volatility/predictor");
 const RiskManager = require("../risk/riskManager");
 const Allocator = require("../portfolio/allocator");
+const CapitalRing = require("../portfolio/capitalRing");
 const PaperBroker = require("../paper/broker");
 const MemecoinScanner = require("../memecoin/scanner");
 const ExchangeManager = require("../exchange/manager");
@@ -29,6 +30,10 @@ class Engine {
     this.market = new MarketData(config.universe);
     this.risk = new RiskManager(config);
     this.allocator = new Allocator(config);
+    // AWP Capital Ring (Shield/Spear two-pool allocation) — disabled by
+    // default; when disabled, computeTargets() below behaves exactly like
+    // the plain allocator it wraps.
+    this.capitalRing = new CapitalRing(config);
     this.paper = new PaperBroker(config);
     this.scanner = new MemecoinScanner(config);
     this.exchanges = new ExchangeManager(config);
@@ -119,7 +124,8 @@ class Engine {
       const inventoryRatio = maxNotional > 0 ? Math.max(0, Math.min(1, currentNotional / maxNotional)) : 0;
       const bars = this.market.getBars(symbol);
       const evalResult = strategy.evaluate(series, { strategy: stratName, context: { inventoryRatio, equity: preEquity, bars } });
-      return { symbol, price, strategy: stratName, ...evalResult };
+      const pool = this.capitalRing.isSpear(stratName) ? "spear" : "shield";
+      return { symbol, price, strategy: stratName, pool, ...evalResult };
     });
     this.lastEvaluations = evaluations;
 
@@ -140,16 +146,18 @@ class Engine {
     // 2) Portfolio rotation targets (Sortino mode reuses the same
     // per-symbol series the volatility radar just computed; the macro
     // overlay can only ever shrink total deployment, never grow it).
-    const { targets, ranked } = this.allocator.computeTargets(evaluations, {
+    const { targets, ranked, pools } = this.capitalRing.computeTargets(evaluations, {
       seriesBySymbol,
       macro: this.lastMacroFlow,
     });
     this.lastTargets = targets;
+    this.lastPools = pools || null;
 
     // 3) Risk + rebalance toward targets
     const equity = this.paper.equity(prices);
     this.risk.updateEquity(equity);
     this.risk.updateMarketStress(this.lastVolatility);
+    this.lastSpearRisk = this.capitalRing.enabled ? this.capitalRing.updateSpearRisk(this.paper, equity, prices) : null;
     const minTradeUsd = this.config.capital.minTradeUsd || 1;
     const actions = [];
 
@@ -183,7 +191,7 @@ class Engine {
         const notional = Math.min(diff, assessment.maxNotional, this.paper.cash);
         // Fee-aware floor: skip trades too small to survive fees + minimums.
         if (notional >= minTradeUsd) {
-          const fill = await this._execute({ symbol: ev.symbol, side: "BUY", notional, price });
+          const fill = await this._execute({ symbol: ev.symbol, side: "BUY", notional, price, tag: ev.pool });
           if (fill) actions.push({ symbol: ev.symbol, intent: "BUY", fill });
         } else if (notional > 0) {
           actions.push({ symbol: ev.symbol, intent: "BUY", skipped: `below min trade $${minTradeUsd}` });
@@ -193,7 +201,7 @@ class Engine {
         const notional = Math.min(-diff, currentNotional);
         // Allow small SELLs only if they close the position (avoid fee-dust dust).
         if (notional >= minTradeUsd || notional >= currentNotional - 1e-9) {
-          const fill = await this._execute({ symbol: ev.symbol, side: "SELL", notional, price });
+          const fill = await this._execute({ symbol: ev.symbol, side: "SELL", notional, price, tag: ev.pool });
           if (fill) actions.push({ symbol: ev.symbol, intent: "SELL", fill });
         }
       }
@@ -228,10 +236,10 @@ class Engine {
     return state;
   }
 
-  async _execute({ symbol, side, notional, price }) {
+  async _execute({ symbol, side, notional, price, tag }) {
     // PAPER path (default & safe)
     if (!this.config.canTradeLive()) {
-      const fill = this.paper.execute({ symbol, side, notional, price });
+      const fill = this.paper.execute({ symbol, side, notional, price, tag });
       if (fill) this.notifier.notifyFill(fill);
       return fill;
     }
@@ -248,7 +256,7 @@ class Engine {
         `REFUSED live ${side} ${symbol}: price source is "${dataSource || "UNKNOWN"}", not LIVE — ` +
           "will not place a real order against simulated/stale data. Falling back to paper fill."
       );
-      const fill = this.paper.execute({ symbol, side, notional, price });
+      const fill = this.paper.execute({ symbol, side, notional, price, tag });
       if (fill) this.notifier.notifyFill({ ...fill, note: `LIVE blocked: price source was ${dataSource || "UNKNOWN"}, not LIVE` });
       return fill;
     }
@@ -264,13 +272,13 @@ class Engine {
       const result = await this.exchanges.routeLiveOrder(order, venue);
       log.warn("ENGINE", `LIVE fill ${side} ${symbol}: ${result.status}`);
       // Mirror into paper ledger so equity/positions stay coherent in the UI
-      const mirror = this.paper.execute({ symbol, side, notional, price });
+      const mirror = this.paper.execute({ symbol, side, notional, price, tag });
       const fill = { ...mirror, mode: "LIVE", venue, raw: result.raw };
       this.notifier.notifyFill(fill);
       return fill;
     } catch (e) {
       log.error("ENGINE", `LIVE order failed, falling back to paper ledger: ${e.message}`);
-      const fill = this.paper.execute({ symbol, side, notional, price });
+      const fill = this.paper.execute({ symbol, side, notional, price, tag });
       if (fill) this.notifier.notifyFill(fill);
       return fill;
     }

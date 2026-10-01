@@ -1,30 +1,64 @@
-# Strategy spec: Autonomous Wealth Protocol (low-capital)
+# Strategy spec: Autonomous Wealth Protocol (AWP)
 
-Status: **awaiting spec** — registered as an inert placeholder in
-`src/signals/strategies/placeholders.js`. It will always return `FLAT`
-until this file is filled in and implemented.
+Status: **implemented — spread across several existing modules**, same
+pattern as `DNFH.md`/`OVERLORD.md`: the `autonomouswealth` registry slot
+stays inert, because AWP isn't one per-symbol signal — it's a capital
+structure (Shield/Spear) plus a sizing rule plus a real entry strategy
+(Fibonacci confluence), each already implemented in its own module.
 
-You described this as designed for "extremely low capital allocation."
-Please answer:
+## What you asked for, and where it actually lives
 
-1. **What's the starting capital range** this is meant to run on (e.g.
-   $20–$200)? Low capital changes everything — fee drag, minimum order
-   sizes, and slippage dominate at small size, so the strategy needs to be
-   fee-aware and probably trade less often / target high-conviction setups
-   on low-fee venues or on-chain DEX aggregators.
-2. **What's the compounding rule?** Does it reinvest 100% of gains, or peel
-   off a %? Any withdrawal rule?
-3. **What markets** — majors only (cheaper, more liquid, tighter spreads —
-   usually better for tiny accounts) or does it need memecoin/alt exposure
-   for bigger % moves?
-4. **Entry/exit logic** — same questions as the other templates: what
-   triggers in, what triggers out?
-5. **Max simultaneous positions** — with low capital, concentration risk
-   matters a lot; is this meant to be one position at a time, or split?
-6. **Survival rule** — you said "survival before profitability." What's the
-   hard floor (e.g. "never let equity drop below $X" / "stop trading after
-   N consecutive losses")?
+| Spec item | Formula / rule | Implementation |
+|---|---|---|
+| Two-tier capital ring: Shield 80% / Spear 20% | Shield = conservative/low-vol strategies; Spear = high-conviction momentum, own loss ceiling | `src/portfolio/capitalRing.js` (disabled by default — `CAPITAL_RING_ENABLED=true`). Maps pool membership onto the *existing* per-symbol strategy router: route your high-conviction symbols to the `fibonacci` strategy to put them in the spear pool. |
+| Spear pool's own scoped daily-loss ceiling | breach halts NEW spear entries only, not the whole engine | `capitalRing.updateSpearRisk()` — rolling cooldown halt (`CAPITAL_RING_SPEAR_DAILY_LOSS_CEILING_PCT`, default 5%), shield pool + all exits keep running through a spear halt |
+| Kelly-Sortino sizing: `f* = (p·b − q)/b · sortino_scalar` | `sortino_scalar = clamp(target_downside_vol/realized_downside_deviation, 0.1, 0.35)` | `src/portfolio/sortino.js` — `kellyFraction()`, `sortinoScalar()`, `downsideDeviation()`, combined in `kellySortinoFraction()`. Exported for use by a position-sizing caller; negative-edge bets clamp to 0 (never sizes against your own edge). |
+| Fibonacci confluence entries (0.382/0.5/0.618-0.65 golden pocket, 5m/15m confirmation) | higher-TF trend + retracement + stochastic/volume confirmation -> LONG | `src/signals/strategies/fibonacci.js` — real registry strategy (`"fibonacci"`), plugs into the standard `evaluate(series) -> {signal, confidence, score, indicators, reasons}` interface like any other strategy. Uses real OHLCV bars (`src/market/marketData.js` `getBars()`/`refreshBars()`) for swing/stochastic/ATR, not just closes. |
+| Tiered take-profit ladder (35%@1.272 w/ SL->BE+fees, 40%@1.618, 25% trail@2.618 via 2.5×ATR14) | computed and reported | `fibonacci.js` computes and returns the full ladder under `indicators.tpPlan` — see the limitation note below for what's NOT automated yet. |
+| Cold-start sizing guardrails | absolute per-trade $ ceiling + true rolling 24h drawdown-halt cooldown | `src/risk/riskManager.js` — `config.capital.maxTradeUsd` (env `MAX_TRADE_USD`, 0=disabled) and `config.capital.haltCooldownHours` (env `HALT_COOLDOWN_HOURS`, default 24) — see the cold-start bootstrap roadmap below. |
 
-Once I have this, I'll implement it as a real, testable strategy module,
-wire it into the risk manager's existing circuit breaker, and flip its
-`status` to `"active"`.
+## Honest limitation: the TP ladder is computed, not yet auto-executed
+
+The engine's rotation model is **continuous target-weight rebalancing**:
+every tick it computes "what % of equity should symbol X be" and
+buys/sells the delta. It has no native concept of "close exactly 35% of
+this specific position, then move the stop to breakeven, then trail the
+rest" — that's a **discrete, path-dependent, per-position state machine**,
+a fundamentally different execution model.
+
+`fibonacci.js` computes the full ladder (TP1/TP2/TP3 prices, the
+breakeven-move rule, the ATR trailing-stop distance) and surfaces it in
+`indicators.tpPlan` for display and manual execution. Fully automating it
+would need a new parallel **position-manager subsystem** that tracks
+individual lots and their own exit state outside the target-weight loop —
+that's flagged here as a real follow-up, not silently skipped or claimed
+as done.
+
+## Cold-start bootstrap roadmap (the three stages you specified)
+
+- **Stage 1 — micro-sandbox**: `MAX_TRADE_USD=2` (or 2-5) caps every trade
+  to an absolute dollar ceiling regardless of configured starting equity or
+  percentage caps. `MAX_DAILY_DRAWDOWN_PCT=0.03` + `HALT_COOLDOWN_HOURS=24`
+  gives a true rolling 24h halt on a 3% daily-drawdown breach (previously
+  the halt only cleared at the next calendar-day boundary, which could be
+  under an hour away).
+- **Stage 2 — synthetic validation (10k block-bootstrap paths, Sortino>1.8
+  gate)**: **not yet implemented this round** — tracked as a follow-up. It
+  would extend `src/backtest/backtester.js` with a block-bootstrap resampler
+  over recent price history (not raw order-book snapshots — those aren't
+  stored anywhere in this app; that substitution will be documented
+  honestly if/when it's built) and gate "autonomous eligibility" on the
+  Sortino ratio clearing 1.8 across ≥95% of resampled runs.
+- **Stage 3 — execution hygiene**: already the app's default posture —
+  there is no market-order code path anywhere in this codebase (HyperLiquid
+  and every exchange connector route limit/post-only orders), and
+  `riskManager.assess()` already gates every trade on confidence +
+  exposure + regime before sizing. The DNFH net-edge gate
+  (`computeNetEdge()`) is the "net-edge-positive gate on every tx" for the
+  funding-harvest side specifically.
+
+This slot stays inert for the same reason `dnfh`/`overlord` do: the real
+logic is a cross-cutting set of modules, not a single `evaluate(series) ->
+{signal}` function this registry calls per-symbol. The real per-symbol
+signal AWP contributes is the `fibonacci` strategy — select it directly or
+route symbols to it via `config.strategyRoutes`.

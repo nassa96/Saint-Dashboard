@@ -349,6 +349,14 @@ app.get("/api/dnfh/scan", async (req, res) => {
   }
 });
 
+app.get("/api/avss/scan", async (req, res) => {
+  try {
+    res.json(await engine.avss.scan());
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.get("/api/dnfh/rebalance-check", async (req, res) => {
   try {
     const { symbol, spotPx, perpPx } = req.query || {};

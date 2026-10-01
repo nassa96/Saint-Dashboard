@@ -18,6 +18,7 @@ const HyperLiquid = require("../src/exchange/hyperliquid");
 const ExchangeManager = require("../src/exchange/manager");
 const { TronWallet } = require("../src/wallet/tron");
 const DnfhEngine = require("../src/yield/dnfh");
+const AvssScanner = require("../src/signals/avss");
 const dnfhStore = require("../src/yield/dnfhStore");
 const macroFlow = require("../src/intelligence/flow");
 const Engine = require("../src/engine/engine");
@@ -425,6 +426,35 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(negativeEpochCheck.shouldRebalance === true && negativeEpochCheck.reasons.some((r) => r.includes("negative")), "DNFH flags a rebalance after 3 consecutive negative funding epochs");
   dnfhStore.clearOpenPosition(rebalSymbol);
   ok("DNFH rebalance-trigger check detects both delta-drift and consecutive-negative-funding-epoch conditions");
+
+  // AVSS — scan-only cross-venue lag + price-flow-spike detector
+  const avssNow = Date.now();
+  const avssHistory = [];
+  let avssPx = 100;
+  for (let i = 30; i >= 6; i--) {
+    avssHistory.push({ ts: avssNow - i * 5000, price: avssPx });
+  }
+  for (let i = 5; i >= 0; i--) {
+    avssPx = avssPx * 1.006; // sharp climb inside the last 60s window
+    avssHistory.push({ ts: avssNow - i * 5000, price: avssPx });
+  }
+  const avssMarket = { universe: ["BTC-USD"], latest: { "BTC-USD": { price: avssPx } }, history: { "BTC-USD": avssHistory } };
+  const avssHl = { _info: async () => [{ universe: [{ name: "BTC" }] }, [{ markPx: String(avssPx * 1.003) }]] }; // 30bps rich vs spot
+  const avss = new AvssScanner({ exchanges: { venues: { hyperliquid: avssHl } }, market: avssMarket, config: { universe: ["BTC-USD"] } });
+  const avssResult = await avss.scan();
+  assert(avssResult.scanOnly === true, "AVSS is explicitly scan/report-only — no execution path");
+  const avssCandidate = avssResult.candidates[0];
+  assert(avssCandidate.lagTriggered === true, "AVSS flags a >18bps spot/perp lag");
+  assert(avssCandidate.flowTriggered === true, "AVSS flags a >3sigma 60s price-flow spike (proxy, not real CVD)");
+  assert(avssCandidate.triggered === true, "AVSS fires only when both the lag AND flow-spike conditions confirm");
+  assert(/NOT real trade-tagged CVD/.test(avssCandidate.note), "AVSS is honestly labeled as a price-based proxy, not real CVD");
+  const avssNoTrigger = await (async () => {
+    const calmMarket = { universe: ["BTC-USD"], latest: { "BTC-USD": { price: 100 } }, history: { "BTC-USD": avssHistory.map((h) => ({ ts: h.ts, price: 100 })) } };
+    const calmHl = { _info: async () => [{ universe: [{ name: "BTC" }] }, [{ markPx: "100.01" }]] };
+    return new AvssScanner({ exchanges: { venues: { hyperliquid: calmHl } }, market: calmMarket, config: { universe: ["BTC-USD"] } }).scan();
+  })();
+  assert(avssNoTrigger.candidates[0].triggered === false, "AVSS stays quiet when there's no lag and no flow spike");
+  ok("AVSS scan-only detector confirms cross-venue lag + price-flow-spike confluence before flagging a candidate");
 
   // paper broker (persistence disabled for isolation)
   const pb = new PaperBroker(config, { persist: false });

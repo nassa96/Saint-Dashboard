@@ -18,6 +18,7 @@ const MemecoinScanner = require("../memecoin/scanner");
 const ExchangeManager = require("../exchange/manager");
 const WalletManager = require("../wallet/manager");
 const DnfhEngine = require("../yield/dnfh");
+const AvssScanner = require("../signals/avss");
 const macroFlow = require("../intelligence/flow");
 const Notifier = require("../alerts/notifier");
 const log = require("../util/logger");
@@ -41,6 +42,9 @@ class Engine {
     // Delta-neutral funding harvest: manual, cross-venue (Base spot +
     // HyperLiquid perp short), never called by the auto-rotation loop.
     this.dnfh = new DnfhEngine({ exchanges: this.exchanges, wallet: this.wallet, config });
+    // AVSS: scan/report-only cross-venue lag + flow-spike detector. No
+    // execution path — see src/signals/avss.js header for why.
+    this.avss = new AvssScanner({ exchanges: this.exchanges, market: this.market, config });
     this.notifier = new Notifier(config);
 
     // Activate the configured signal strategy (momentum | meanreversion | ensemble)

@@ -1078,7 +1078,7 @@ async function loadExchangeBalances(){
 }
 async function connectVenue(name){
   const body={venue:name, key:$("k-"+name).value.trim(), secret:$("s-"+name).value.trim()};
-  if(VENUE_META[name].needsPass) body.passphrase=($("p-"+name).value||'').trim();
+  if(name==="coinbase") body.portfolioUuid=($("u-"+name).value||"").trim();
   $("venue-res-"+name).innerHTML=`Saving &amp; verifying…`;
   try{
     const r=await fetch('/api/exchanges/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

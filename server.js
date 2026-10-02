@@ -130,9 +130,18 @@ app.get("/api/exchanges/balances/all", async (req, res) => {
 // never enables live trading. Keys land in data/credentials.json (git-ignored).
 app.post("/api/exchanges/connect", async (req, res) => {
   try {
-    const { venue, key, secret, passphrase } = req.body || {};
-    if (!venue || !key || !secret) return res.status(400).json({ error: "venue, key and secret are required" });
-    res.json(await engine.exchanges.connect(venue.toLowerCase(), { key, secret, passphrase: passphrase || "" }));
+    const { venue, key, secret, passphrase, portfolioUuid } = req.body || {};
+    const normalizedVenue = String(venue || "").toLowerCase();
+    if (!normalizedVenue || !key || !secret) {
+      return res.status(400).json({ error: "venue, key and secret are required" });
+    }
+    if (normalizedVenue === "coinbase" && !portfolioUuid) {
+      return res.status(400).json({ error: "Coinbase requires key name, ECDSA private key, and portfolio UUID" });
+    }
+    const creds = normalizedVenue === "coinbase"
+      ? { key, secret, portfolioUuid }
+      : { key, secret, passphrase: passphrase || "" };
+    res.json(await engine.exchanges.connect(normalizedVenue, creds));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

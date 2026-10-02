@@ -1043,7 +1043,7 @@ async function lookupManualWallet(){
 }
 
 // ---- Exchange balances + key management (read+trade scoped keys only) ----
-const VENUE_META={coinbase:{needsPass:true},kraken:{needsPass:false},binanceus:{needsPass:false}};
+const VENUE_META={coinbase:{kind:"cdp"},kraken:{kind:"legacy"},binanceus:{kind:"legacy"}};
 async function loadExchangeBalances(){
   $("venues-mgmt").innerHTML = `<span class="mut">loading…</span>`;
   try{
@@ -1066,9 +1066,7 @@ async function loadExchangeBalances(){
           <div class="mini">${connected?'<span class="pos">🔑 keys saved</span>':'<span class="mut">no keys</span>'} · ${h.reachable?'<span class="pos">✓ reachable</span>':'<span class="warn-txt">⚠ unreachable</span>'} <span class="mut">${feeTxt}</span></div>
           <div style="margin:6px 0">${balRows}</div>
           <div class="formrow" style="margin:4px 0">
-            <input id="k-${name}" class="mini-input" placeholder="API key" autocomplete="off">
-            <input id="s-${name}" class="mini-input" placeholder="API secret" type="password" autocomplete="off">
-            ${VENUE_META[name].needsPass?`<input id="p-${name}" class="mini-input" placeholder="passphrase" type="password" autocomplete="off">`:''}
+            ${name==="coinbase" ? `<input id="k-${name}" class="mini-input" placeholder="API key name (organizations/.../apiKeys/...)" autocomplete="off"><input id="s-${name}" class="mini-input" placeholder="EC private key (PEM)" type="password" autocomplete="off"><input id="u-${name}" class="mini-input" placeholder="Coinbase portfolio UUID" autocomplete="off">` : `<input id="k-${name}" class="mini-input" placeholder="API key" autocomplete="off"><input id="s-${name}" class="mini-input" placeholder="API secret" type="password" autocomplete="off">`}
             <button class="mini-btn go" onclick="connectVenue('${name}')">Save &amp; verify</button>
             ${connected?`<button class="mini-btn danger" onclick="disconnectVenue('${name}')">Disconnect</button>`:''}
           </div>
@@ -1080,7 +1078,7 @@ async function loadExchangeBalances(){
 }
 async function connectVenue(name){
   const body={venue:name, key:$("k-"+name).value.trim(), secret:$("s-"+name).value.trim()};
-  if(VENUE_META[name].needsPass) body.passphrase=($("p-"+name).value||'').trim();
+  if(name==="coinbase") body.portfolioUuid=($("u-"+name).value||"").trim();
   $("venue-res-"+name).innerHTML=`Saving &amp; verifying…`;
   try{
     const r=await fetch('/api/exchanges/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

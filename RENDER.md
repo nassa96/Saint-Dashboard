@@ -13,8 +13,7 @@ reads `render.yaml` automatically.
 ## Before you start
 - A **Render account** (render.com) — free to create.
 - This repo on **GitHub** (it already is: `nassa96/Saint-Dashboard`).
-- Your **Coinbase Advanced Trade** API key/secret/passphrase (View + Trade only,
-  **withdrawals disabled**) — you can also add these later from the dashboard.
+- Your **Coinbase Advanced Trade / CDP Secret API Key**: ECDSA key with View + Trade, withdrawals/transfers disabled, plus the exact portfolio UUID. The Connections page accepts these directly.
 
 ---
 
@@ -38,7 +37,7 @@ In the service's **Environment** tab, fill the values Render left blank:
 | Variable | What to set |
 |---|---|
 | `DASHBOARD_PASSWORD` | **Required.** A strong password — this protects your whole dashboard, including the live-trading arm button. |
-| `COINBASE_API_KEY` / `COINBASE_API_SECRET` / `COINBASE_API_PASSPHRASE` | Your Coinbase Advanced Trade keys (optional here — you can also add them from the Connections page after deploy). |
+| `COINBASE_API_KEY_NAME` / `COINBASE_API_KEY_SECRET` / `COINBASE_PORTFOLIO_UUID` | Coinbase CDP Advanced Trade credentials: key name, ECDSA private-key PEM, and exact portfolio UUID. Keep withdrawals/transfers disabled. |
 
 `SESSION_SECRET` is auto-generated. Click **Save, rebuild** if prompted.
 

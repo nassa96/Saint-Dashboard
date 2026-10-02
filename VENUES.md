@@ -68,7 +68,7 @@ whenever funding is positive, independent of which way price moves.
 ### Easiest way to connect: the Connections page
 Open **`/connect.html`** (🔌 Connect in the dashboard header). For each venue you get
 a status badge (keys saved? reachable?), the fee schedule, and a form to paste your
-**trade-only** API key/secret (+ passphrase for Coinbase). Hit **Save & verify** and it
+**trade-only** credentials. Coinbase uses CDP key name + ECDSA private-key PEM + portfolio UUID; no passphrase. Hit **Save & verify** and it
 saves to `data/credentials.json` (git-ignored) and runs a read-only reachability +
 balance check. **Disconnect** wipes them. Live trading stays off regardless — connecting
 only enables read-only access until you deliberately arm it.

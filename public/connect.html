@@ -56,7 +56,7 @@
     <!-- EXCHANGES -->
     <div class="card">
       <h3>Exchange venues</h3>
-      <div class="desc">Connect the exchange your money is on. On Coinbase, use <b>Advanced Trade</b> keys (0.60% fee) — not the one-tap app.</div>
+      <div class="desc">Connect the exchange your money is on. Coinbase uses the current <b>CDP Secret API Key</b> contract: key name + ECDSA private key + portfolio UUID. Withdrawals/transfers must remain disabled.</div>
       <div id="venues"></div>
     </div>
 
@@ -111,9 +111,10 @@
       <div class="note">
         <b>Coinbase:</b>
         <ol>
-          <li>Coinbase → Settings → API (or Advanced Trade API).</li>
-          <li>Create a key with <b>View</b> + <b>Trade</b> permissions. <b>Do NOT enable Transfer/Withdraw.</b></li>
-          <li>IP-allowlist your server if offered. Copy the API key, secret, and passphrase here.</li>
+          <li>Coinbase Developer Platform → create a <b>Secret API Key</b> for Advanced Trade.</li>
+          <li>Use <b>ECDSA</b> and grant <b>View</b> + <b>Trade</b>. Keep Transfer/Withdrawals <b>OFF</b>.</li>
+          <li>Copy the <b>API key name</b>, the full <b>EC private key (PEM)</b>, and the <b>portfolio UUID</b>.</li>
+          <li>Do <b>not</b> paste a Coinbase Commerce credential or legacy passphrase.</li>
         </ol>
         <b>Kraken / Binance.US:</b> create an API key with trade + query permissions, withdrawals off, then paste key + secret (no passphrase).
       </div>
@@ -122,7 +123,7 @@
 
 <script>
 const $=s=>document.querySelector(s);
-const VENUE_META={coinbase:{needsPass:true},kraken:{needsPass:false},binanceus:{needsPass:false}};
+const VENUE_META={coinbase:{kind:"cdp"},kraken:{kind:"legacy"},binanceus:{kind:"legacy"}};
 
 async function jget(u){const r=await fetch(u);if(r.status===401){location.href='/login.html';throw 0;}return r.json();}
 async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json();}
@@ -149,9 +150,12 @@ async function loadVenues(){
         ${connected?`<button class="danger" onclick="disc('${name}')">Disconnect</button>`:''}
       </div>
       <div class="form" id="form-${name}">
-        <input id="k-${name}" placeholder="API key" autocomplete="off">
-        <input id="s-${name}" placeholder="API secret" type="password" autocomplete="off">
-        ${VENUE_META[name].needsPass?`<input id="p-${name}" placeholder="passphrase" type="password" autocomplete="off">`:''}
+        ${name==="coinbase"
+          ? `<input id="k-${name}" placeholder="API key name (organizations/.../apiKeys/...)" autocomplete="off">
+             <input id="s-${name}" placeholder="EC private key (PEM)" type="password" autocomplete="off">
+             <input id="u-${name}" placeholder="Coinbase portfolio UUID" autocomplete="off">`
+          : `<input id="k-${name}" placeholder="API key" autocomplete="off">
+             <input id="s-${name}" placeholder="API secret" type="password" autocomplete="off">`}
         <button class="primary" onclick="connect('${name}')">Save &amp; verify</button>
       </div>
       <div class="result" id="res-${name}"></div>`;
@@ -161,7 +165,7 @@ async function loadVenues(){
 window.toggleForm=n=>$("#form-"+n).classList.toggle("open");
 window.connect=async n=>{
   const body={venue:n,key:$("#k-"+n).value.trim(),secret:$("#s-"+n).value.trim()};
-  if(VENUE_META[n].needsPass)body.passphrase=($("#p-"+n).value||"").trim();
+  if(n==="coinbase")body.portfolioUuid=($("#u-"+n).value||"").trim();
   $("#res-"+n).textContent="Saving & verifying…";
   const r=await jpost('/api/exchanges/connect',body);
   $("#res-"+n).textContent=r.error?("⚠ "+JSON.stringify(r)):

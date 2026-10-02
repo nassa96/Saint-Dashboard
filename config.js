@@ -175,9 +175,11 @@ const config = {
       secret: process.env.BINANCEUS_API_SECRET || "",
     },
     coinbase: {
-      key: process.env.COINBASE_API_KEY || "",
-      secret: process.env.COINBASE_API_SECRET || "",
-      passphrase: process.env.COINBASE_API_PASSPHRASE || "",
+      // Coinbase CDP Secret API Key: key name + ECDSA private key + portfolio UUID.
+      key: process.env.COINBASE_API_KEY_NAME || "",
+      secret: process.env.COINBASE_API_KEY_SECRET || "",
+      portfolioUuid: process.env.COINBASE_PORTFOLIO_UUID || "",
+      // Legacy HMAC passphrase is intentionally not consumed by the CDP adapter.
     },
     kraken: {
       key: process.env.KRAKEN_API_KEY || "",

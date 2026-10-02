@@ -54,9 +54,9 @@ services:
       - key: PRIMARY_EXCHANGE
         value: coinbase
       # ---- Exchange keys: set these in the Render dashboard (never in git) ----
-      - key: COINBASE_API_KEY
+      - key: COINBASE_API_KEY_NAME
         sync: false
-      - key: COINBASE_API_SECRET
+      - key: COINBASE_API_KEY_SECRET
         sync: false
-      - key: COINBASE_API_PASSPHRASE
+      - key: COINBASE_PORTFOLIO_UUID
         sync: false

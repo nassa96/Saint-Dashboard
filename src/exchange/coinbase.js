@@ -92,7 +92,13 @@ class Coinbase extends BaseExchange {
       order_configuration: config,
     };
     const data = await this._request("POST", "/api/v3/brokerage/orders", payload);
-    return { venue: this.name, clientOrderId, raw: data, orderId: data.order_id, success: data.success };
+    if (data.success !== true) {
+      throw new Error(data.error_response?.message || "Coinbase did not accept the order");
+    }
+    // A create-order success response is not proof of a completed fill. The
+    // order must be queried and reconciled before the local book can mirror it.
+    const orderId = data.success_response?.order_id || data.order_id || null;
+    return { venue: this.name, clientOrderId, raw: data, orderId, status: "submitted", fillConfirmed: false };
   }
 }
 

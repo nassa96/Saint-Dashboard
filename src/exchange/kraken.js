@@ -8,6 +8,14 @@ class Kraken extends BaseExchange {
   constructor(creds) {
     super("kraken", creds);
     this.base = "https://api.kraken.com";
+    this.lastNonce = 0;
+  }
+
+  _nextNonce() {
+    // Kraken requires strictly increasing nonces per API key; concurrent
+    // requests can otherwise reuse Date.now() within the same millisecond.
+    this.lastNonce = Math.max(Date.now() * 1000, this.lastNonce + 1);
+    return this.lastNonce;
   }
 
   _sign(path, nonce, postData) {
@@ -27,7 +35,7 @@ class Kraken extends BaseExchange {
 
   async _private(endpoint, params = {}) {
     const path = `/0/private/${endpoint}`;
-    const nonce = Date.now() * 1000;
+    const nonce = this._nextNonce();
     const body = new URLSearchParams({ nonce: String(nonce), ...params }).toString();
     const sig = this._sign(path, nonce, body);
     const res = await httpRequest(`${this.base}${path}`, {
@@ -63,10 +71,22 @@ class Kraken extends BaseExchange {
       pair: order.symbol, // e.g. XBTUSD
       type: order.side.toLowerCase(),
       ordertype: "market",
-      volume: String(order.quantity),
     };
+    if (order.side === "BUY" && Number(order.quoteOrderQty) > 0) {
+      // Kraken's spot AddOrder uses base volume by default. viqc explicitly
+      // interprets volume in quote currency for buys, matching the engine's
+      // USD-notional sizing and avoiding an undefined base-quantity order.
+      params.volume = String(order.quoteOrderQty);
+      params.oflags = "viqc";
+    } else if (Number(order.quantity) > 0) {
+      params.volume = String(order.quantity);
+    } else {
+      throw new Error("order quantity (or BUY quoteOrderQty) must be positive");
+    }
     const result = await this._private("AddOrder", params);
-    return { venue: this.name, raw: result, status: "submitted" };
+    // AddOrder returns a submission acknowledgement, not a confirmed fill.
+    // Callers must not treat this as a filled position until it is reconciled.
+    return { venue: this.name, raw: result, status: "submitted", fillConfirmed: false };
   }
 }
 

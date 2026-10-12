@@ -16,6 +16,7 @@ const { sortinoRatio, downsideDeviation, sortinoScalar, kellyFraction, kellySort
 const mevDefense = require("../src/wallet/mevDefense");
 const HyperLiquid = require("../src/exchange/hyperliquid");
 const ExchangeManager = require("../src/exchange/manager");
+const Kraken = require("../src/exchange/kraken");
 const { TronWallet } = require("../src/wallet/tron");
 const DnfhEngine = require("../src/yield/dnfh");
 const AvssScanner = require("../src/signals/avss");
@@ -104,7 +105,10 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   const rmCapped = new RiskManager({ capital: { ...config.capital, maxTradeUsd: 5 } });
   const cappedAssess = rmCapped.assess({ signal: "LONG", confidence: 0.9, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100 });
   assert(cappedAssess.approved === true && cappedAssess.maxNotional <= 5, "MAX_TRADE_USD caps notional size regardless of how much room the percentage caps would otherwise allow");
-  ok("risk manager enforces an absolute MAX_TRADE_USD ceiling for micro-capital cold-start mode");
+  const rmPerTrade = new RiskManager({ capital: { ...config.capital, perTradeRiskPct: 0.01, maxPositionPct: 0.5, maxPortfolioRiskPct: 0.9, maxTradeUsd: 0 } });
+  const perTradeAssess = rmPerTrade.assess({ signal: "LONG", confidence: 0.9, equity: 10000, currentExposure: 0, symbolExposure: 0, price: 100 });
+  assert(perTradeAssess.approved === true && perTradeAssess.maxNotional <= 100, "PER_TRADE_RISK_PCT caps each individual entry at its configured equity fraction");
+  ok("risk manager enforces both the absolute MAX_TRADE_USD ceiling and the per-entry notional cap");
 
   // rolling 24h drawdown-halt cooldown — must NOT clear just because
   // midnight passed; only clears once its own cooldown timestamp elapses
@@ -595,38 +599,145 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(state.volatility && typeof state.volatility === "object", "volatility radar present in engine snapshot");
   ok("engine full pipeline tick completes end-to-end");
 
+  // Concurrent slow ticks must serialize rather than compute orders against
+  // the same pre-trade exposure snapshot.
+  let releaseTick;
+  const tickGuard = {
+    _tickInFlight: false,
+    skippedTicks: 0,
+    _runTick: () => new Promise((resolve) => { releaseTick = resolve; }),
+    snapshot: () => ({ busy: true }),
+  };
+  const firstTick = Engine.prototype.tick.call(tickGuard);
+  const secondTick = await Engine.prototype.tick.call(tickGuard);
+  assert(secondTick.busy === true && tickGuard.skippedTicks === 1, "overlapping tick is skipped while one is in flight");
+  releaseTick({ ok: true });
+  await firstTick;
+  assert(tickGuard._tickInFlight === false, "tick lock clears after completion");
+  ok("engine serializes ticks to prevent duplicate orders from concurrent snapshots");
+
+  let finishWarmup;
+  const scheduledTimers = [];
+  const realSetInterval = global.setInterval;
+  const realGetFlow = macroFlow.getFlow;
+  const fakeMacroFlow = require("../src/intelligence/flow");
+  global.setInterval = (fn, ms) => { const id = { fn, ms }; scheduledTimers.push(id); return id; };
+  fakeMacroFlow.getFlow = async () => ({});
+  const startupGuard = {
+    running: false,
+    _startGeneration: 0,
+    liveExecutionFault: null,
+    config: { mode: "PAPER", canTradeLive: () => false, disarmLive: () => {} },
+    market: {
+      warmup: () => new Promise((resolve) => { finishWarmup = resolve; }),
+      refreshBars: async () => ({}),
+    },
+    scanner: { scan: async () => ({ candidates: [] }) },
+    notifier: { notifyMemecoins: () => {} },
+    dnfh: { recordFundingEpoch: async () => ({}) },
+    exchanges: { healthCheck: async () => ({}) },
+    tick: async () => ({}),
+  };
+  try {
+    const startWhileWarming = Engine.prototype.start.call(startupGuard, 5000);
+    Engine.prototype.stop.call(startupGuard);
+    finishWarmup({});
+    await startWhileWarming;
+    assert(startupGuard.running === false && scheduledTimers.length === 0, "stop during slow warmup cannot resurrect engine timers");
+  } finally {
+    global.setInterval = realSetInterval;
+    fakeMacroFlow.getFlow = realGetFlow;
+  }
+  ok("engine stop remains final even when called during asynchronous startup warmup");
+  const afterStop = await Engine.prototype._execute.call({ _stoppedByOperator: true, liveExecutionFault: null }, {
+    symbol: "BTC-USD", side: "BUY", notional: 20, price: 100, tag: "stop-test",
+  });
+  assert(afterStop === null, "a pending execution cannot create a paper fill after the operator stop latch");
+  ok("operator stop blocks both subsequent ticks and delayed local fills");
+
+  const { assessLiveReadiness } = require("../src/ops/liveReadiness");
+  const readiness = assessLiveReadiness(config, engine, { enabled: false });
+  assert(readiness.ready === false && readiness.blockers.some((b) => b.id === "account-reconciliation"), "live readiness reports hard blockers for missing exchange reconciliation");
+  assert(readiness.checks.some((c) => c.id === "order-lifecycle" && c.status === "blocked"), "live readiness flags unverified final fills and ambiguous order recovery");
+  ok("live readiness audit reports structural live-funds blockers instead of equating a connected key with production readiness");
+
+  // PAPER and LIVE orders must both be priced from a fresh real quote. PAPER
+  // mode may simulate fills, but a fabricated SIM price cannot create fake
+  // performance evidence.
+  const simPaperEngine = {
+    config: { canTradeLive: () => false },
+    market: { latest: { "BTC-USD": { source: "SIM", price: 100, ts: Date.now() } } },
+    paper: { execute: () => { simPaperEngine.paperCalls = (simPaperEngine.paperCalls || 0) + 1; return { status: "FILLED" }; } },
+    notifier: { notifyFill: () => {} },
+    _unsafePaperQuoteWarnings: {},
+  };
+  const simPaperFill = await Engine.prototype._execute.call(simPaperEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
+  assert(simPaperFill === null && !simPaperEngine.paperCalls, "PAPER mode skips a SIM quote without inventing a fill");
+  const paperLiveEngine = {
+    config: { canTradeLive: () => false },
+    market: { latest: { "BTC-USD": { source: "LIVE", price: 100, ts: Date.now() } } },
+    paper: { execute: (args) => { paperLiveEngine.paperCalls = (paperLiveEngine.paperCalls || 0) + 1; return { ...args, status: "FILLED" }; } },
+    notifier: { notifyFill: () => {} },
+  };
+  const realQuotePaperFill = await Engine.prototype._execute.call(paperLiveEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
+  assert(realQuotePaperFill?.status === "FILLED" && paperLiveEngine.paperCalls === 1, "PAPER mode continues to simulate fills when backed by a fresh LIVE quote");
+  const staleRunEngine = {
+    _stoppedByOperator: false,
+    _startGeneration: 2,
+    config: { canTradeLive: () => false },
+    market: { latest: { "BTC-USD": { source: "LIVE", price: 100, ts: Date.now() } } },
+    paper: { execute: () => { staleRunEngine.paperCalls = (staleRunEngine.paperCalls || 0) + 1; return { status: "FILLED" }; } },
+    notifier: { notifyFill: () => {} },
+  };
+  const staleRunFill = await Engine.prototype._execute.call(staleRunEngine, {
+    symbol: "BTC-USD", side: "BUY", notional: 100, price: 100, startGeneration: 1,
+  });
+  assert(staleRunFill === null && !staleRunEngine.paperCalls, "an old tick cannot execute after stop followed by a new start");
+  ok("PAPER execution requires a fresh LIVE quote and rejects cancelled/stale engine generations");
+
   // Survivability gate: even when LIVE trading is fully armed, the engine
   // must refuse to place a real order against a symbol whose current price
   // came from the SIM fallback (feed unreachable) rather than a real quote.
   const simGateEngine = {
-    config: { canTradeLive: () => true },
-    market: { latest: { "BTC-USD": { source: "SIM", price: 100 } } },
-    paper: { execute: (args) => ({ ...args, status: "FILLED", viaPaperFallback: true }) },
+    config: { canTradeLive: () => true, disarmLive: () => { simGateEngine.disarmed = true; } },
+    market: { latest: { "BTC-USD": { source: "SIM", price: 100, ts: Date.now() } } },
+    paper: { execute: () => { simGateEngine.paperCalls = (simGateEngine.paperCalls || 0) + 1; return { status: "FILLED" }; } },
     notifier: { notifyFill: () => {} },
-    exchanges: {
-      primary: "coinbase",
-      routeLiveOrder: async () => { throw new Error("a live order must never be attempted when the price source isn't confirmed LIVE"); },
-    },
+    exchanges: { primary: "coinbase", routeLiveOrder: async () => { throw new Error("must not route a SIM quote"); } },
+    _haltLiveExecution: Engine.prototype._haltLiveExecution,
     _venueSymbol: Engine.prototype._venueSymbol,
   };
   const simGateFill = await Engine.prototype._execute.call(simGateEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
-  assert(simGateFill && simGateFill.viaPaperFallback === true, "live execution is refused and falls back to paper when price data isn't confirmed LIVE");
+  assert(simGateFill === null && !simGateEngine.paperCalls && simGateEngine.disarmed, "a non-LIVE price refuses execution, disarms, and never fabricates a paper fill");
 
   const liveGateEngine = {
-    config: { canTradeLive: () => true },
-    market: { latest: { "BTC-USD": { source: "LIVE", price: 100 } } },
+    config: { canTradeLive: () => true, disarmLive: () => {} },
+    market: { latest: { "BTC-USD": { source: "LIVE", price: 100, ts: Date.now() } } },
     paper: { execute: (args) => ({ ...args, status: "FILLED" }) },
     notifier: { notifyFill: () => {} },
     exchanges: {
       primary: "coinbase",
-      routeLiveOrder: async (order) => { liveGateEngine._called = true; return { status: "FILLED", raw: { order } }; },
+      routeLiveOrder: async (order) => { liveGateEngine._called = true; return { status: "FILLED", fillConfirmed: true, raw: { order } }; },
     },
+    _haltLiveExecution: Engine.prototype._haltLiveExecution,
     _venueSymbol: Engine.prototype._venueSymbol,
   };
   const liveGateFill = await Engine.prototype._execute.call(liveGateEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
   assert(liveGateEngine._called === true, "a confirmed-LIVE price source is allowed to reach the exchange routing path");
-  assert(liveGateFill && liveGateFill.mode === "LIVE", "a successful live order is reported with mode=LIVE");
-  ok("engine refuses to risk real money on non-LIVE (SIM/stale) price data, even when fully armed");
+  assert(liveGateFill && liveGateFill.mode === "LIVE", "only a confirmed exchange fill is reported with mode=LIVE");
+
+  const uncertainEngine = {
+    config: { canTradeLive: () => true, disarmLive: () => { uncertainEngine.disarmed = true; } },
+    market: { latest: { "BTC-USD": { source: "LIVE", price: 100, ts: Date.now() } } },
+    paper: { execute: () => { uncertainEngine.paperCalls = (uncertainEngine.paperCalls || 0) + 1; return { status: "FILLED" }; } },
+    notifier: { notifyFill: () => {} },
+    exchanges: { primary: "kraken", routeLiveOrder: async () => { throw new Error("network timeout; order state unknown"); } },
+    _haltLiveExecution: Engine.prototype._haltLiveExecution,
+    _venueSymbol: Engine.prototype._venueSymbol,
+  };
+  const uncertainFill = await Engine.prototype._execute.call(uncertainEngine, { symbol: "BTC-USD", side: "BUY", notional: 100, price: 100 });
+  assert(uncertainFill === null && !uncertainEngine.paperCalls && uncertainEngine.disarmed && uncertainEngine.liveExecutionFault, "an ambiguous live error halts and disarms without inventing a paper fill");
+  ok("engine fails closed on SIM/stale prices and ambiguous live order errors; only reconciled fills may mirror into the ledger");
 
   // Aegis hard killswitch flatten-all: _flattenAll() must SELL every open
   // paper position down to cash via the normal execution path
@@ -824,6 +935,16 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   assert(stats.symbolStats.length === 2 && stats.distribution.length === 8, "analytics symbol breakdown + distribution");
   ok("analytics computes win rate, profit factor, expectancy, distribution");
 
+  // Kraken spot BUYs are quote-notional orders in the engine. Ensure the
+  // connector sends quote volume with Kraken's viqc flag, not undefined qty.
+  const krakenAdapter = new Kraken({ key: "test-key", secret: "dGVzdA==" });
+  let krakenOrderParams;
+  krakenAdapter._private = async (endpoint, params) => { krakenOrderParams = { endpoint, params }; return { txid: ["test-order"] }; };
+  const krakenAck = await krakenAdapter.placeOrder({ symbol: "XBTUSD", side: "BUY", quoteOrderQty: "25.00" }, true);
+  assert(krakenOrderParams.endpoint === "AddOrder" && krakenOrderParams.params.volume === "25.00" && krakenOrderParams.params.oflags === "viqc", "Kraken BUY maps USD notional to quote-volume AddOrder correctly");
+  assert(krakenAck.status === "submitted" && krakenAck.fillConfirmed === false, "Kraken submission acknowledgement is never misreported as a confirmed fill");
+  ok("Kraken notional BUY payload is correctly formed and its AddOrder acknowledgement remains explicitly unfilled");
+
   // exchange credential store + runtime connect/disconnect
   const credStore = require("../src/exchange/credStore");
   const fs3 = require("fs");
@@ -839,20 +960,75 @@ async function assertThrowsAsync(fn, expectedSubstring, message) {
   try { fs3.unlinkSync(credStore.STORE_PATH); } catch {}
   ok("exchange credential store + runtime connect/disconnect work");
 
-  // runtime live-arming (one-click arm + kill switch)
+  // Runtime confirmation cannot bypass the three deployment locks, and
+  // disarming remains effective even when the deployment locks are open.
   const armCfg = require("../config");
-  try { fs3.unlinkSync(require("path").join(__dirname, "..", "data", "live_arm.json")); } catch {}
+  const priorArmConfig = {
+    mode: armCfg.mode,
+    liveTradingEnabled: armCfg.liveTradingEnabled,
+    liveTradingConfirm: armCfg.liveTradingConfirm,
+  };
+  const armPath = require("path").join(__dirname, "..", "data", "live_arm.json");
+  try { fs3.unlinkSync(armPath); } catch {}
   armCfg.disarmLive();
+  // A previously persisted armed marker must not restore live permission in a
+  // fresh process, even when the three deployment locks are configured.
+  fs3.mkdirSync(require("path").dirname(armPath), { recursive: true });
+  fs3.writeFileSync(armPath, JSON.stringify({ armed: true, armedAt: Date.now() }));
+  const childProcess = require("child_process");
+  const restartStatus = childProcess.execFileSync(process.execPath, ["-e", "const c=require('./config'); process.stdout.write(JSON.stringify({canTrade:c.canTradeLive(),rearmRequired:c.liveStatus().rearmRequired}));"], {
+    cwd: require("path").join(__dirname, ".."),
+    env: { ...process.env, TRADING_MODE: "LIVE", LIVE_TRADING_ENABLED: "true", LIVE_TRADING_CONFIRM: "I ACCEPT THE RISK" },
+  }).toString();
+  const restartedArm = JSON.parse(restartStatus);
+  assert(restartedArm.canTrade === false && restartedArm.rearmRequired === true, "a persisted arm is ignored after process restart, even when all environment locks are set");
+  try { fs3.unlinkSync(armPath); } catch {}
+
+  // Presets contain trailing comments; the dotenv loader must preserve their
+  // numeric values and quoted hashes rather than turning limits into NaN.
+  const os = require("os");
+  const tempConfigDir = fs3.mkdtempSync(require("path").join(os.tmpdir(), "saint-dotenv-test-"));
+  try {
+    fs3.copyFileSync(require("path").join(__dirname, "..", "config.js"), require("path").join(tempConfigDir, "config.js"));
+    fs3.writeFileSync(require("path").join(tempConfigDir, ".env"), [
+      "MAX_POSITION_PCT=0.10 # max position comment",
+      "MAX_TRADE_USD=25.5 # absolute cap comment",
+      "TRADING_MODE=PAPER # safe mode comment",
+      'DASHBOARD_PASSWORD="quoted # stays" # trailing comment',
+    ].join("\n"));
+    const cleanEnv = { ...process.env };
+    ["MAX_POSITION_PCT", "MAX_TRADE_USD", "TRADING_MODE", "MODE", "DASHBOARD_PASSWORD"].forEach((k) => delete cleanEnv[k]);
+    const parsedEnv = JSON.parse(childProcess.execFileSync(process.execPath, ["-e", "const c=require('./config'); process.stdout.write(JSON.stringify({position:c.capital.maxPositionPct,trade:c.capital.maxTradeUsd,mode:c.mode,password:c.auth.password}));"], { cwd: tempConfigDir, env: cleanEnv }).toString());
+    assert(parsedEnv.position === 0.1 && parsedEnv.trade === 25.5 && parsedEnv.mode === "PAPER" && parsedEnv.password === "quoted # stays", "dotenv comments and quoted hash values parse without corrupting risk configuration");
+    ok("dotenv inline comments preserve numeric risk settings and quoted secrets");
+  } finally {
+    fs3.rmSync(tempConfigDir, { recursive: true, force: true });
+  }
+  armCfg.mode = "PAPER";
+  armCfg.liveTradingEnabled = false;
+  armCfg.liveTradingConfirm = "";
   assert(armCfg.canTradeLive() === false, "default is PAPER (not armed)");
   let rejected = false;
+  try { armCfg.armLive("I ACCEPT THE RISK"); } catch { rejected = true; }
+  assert(rejected && armCfg.canTradeLive() === false, "dashboard phrase alone cannot bypass deployment locks");
+  armCfg.mode = "LIVE";
+  armCfg.liveTradingEnabled = true;
+  armCfg.liveTradingConfirm = "I ACCEPT THE RISK";
+  rejected = false;
   try { armCfg.armLive("nope"); } catch { rejected = true; }
-  assert(rejected && armCfg.canTradeLive() === false, "arm rejects wrong confirmation phrase");
+  assert(rejected && armCfg.canTradeLive() === false, "arm rejects an incorrect runtime phrase");
   armCfg.armLive("I ACCEPT THE RISK");
-  assert(armCfg.canTradeLive() === true && armCfg.liveStatus().webArmed === true, "arm with exact phrase enables live");
+  assert(armCfg.canTradeLive() === true && armCfg.liveStatus().webArmed === true, "all deployment locks plus the fresh exact confirmation enable the arm gate");
+  armCfg.liveTradingEnabled = false;
+  assert(armCfg.canTradeLive() === false, "master deployment kill switch blocks a previously armed session");
+  armCfg.liveTradingEnabled = true;
   armCfg.disarmLive();
-  assert(armCfg.canTradeLive() === false, "disarm instantly returns to PAPER");
+  assert(armCfg.canTradeLive() === false, "runtime disarm instantly returns to PAPER");
+  armCfg.mode = priorArmConfig.mode;
+  armCfg.liveTradingEnabled = priorArmConfig.liveTradingEnabled;
+  armCfg.liveTradingConfirm = priorArmConfig.liveTradingConfirm;
   try { fs3.unlinkSync(require("path").join(__dirname, "..", "data", "live_arm.json")); } catch {}
-  ok("runtime live-arming: default off, phrase-gated arm, instant disarm");
+  ok("runtime live-arming: all three env locks plus per-process phrase confirmation; instant disarm and restart-safe default-off");
 
   console.log(`\nALL TESTS PASSED (${passed} checks) ✅`);
   process.exit(0);

@@ -10,12 +10,12 @@ services:
     runtime: node
     plan: starter            # Starter+ runs 24/7. The Free plan SLEEPS when idle — bad for a bot.
     region: oregon           # pick the region closest to you / your exchange
-    branch: arena/01a0f196-saint-dashboard
-    buildCommand: npm install
-    startCommand: node server.js
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
-    # Persistent disk so portfolio.json / credentials.json / live_arm.json survive redeploys.
+    # Persistent disk for the PAPER portfolio/history and optional credentials; live arms never resume after restart.
     # (Disks require a paid instance type; remove this block on Free.)
     disk:
       name: saint-data
@@ -26,27 +26,41 @@ services:
         value: "20"
       - key: PORT
         value: "10000"        # Render sets PORT; the server already honors process.env.PORT
-      # ---- Safety: PAPER by default. Arm live from the dashboard when ready. ----
+      # ---- PAPER-only tester rollout; live arming is blocked in this release. ----
       - key: TRADING_MODE
         value: PAPER
+      - key: LIVE_TRADING_ENABLED
+        value: "false"
+      - key: LIVE_TRADING_CONFIRM
+        value: ""
+      - key: ONCHAIN_TRADING_ENABLED
+        value: "false"
       - key: USE_TESTNET
         value: "true"
       # ---- Protect the dashboard (REQUIRED before exposing publicly) ----
       - key: DASHBOARD_PASSWORD
-        sync: false           # set the value in the Render dashboard, not in git
+        generateValue: true   # generated password enables auth; retrieve/share it securely from Render
       - key: SESSION_SECRET
-        generateValue: true   # Render generates a strong random secret
-      # ---- Your $20 USDC tuning (matches presets/twenty-usdc.env) ----
+        generateValue: true   # Render generates a strong persistent random signing secret
+      # ---- Conservative PAPER demo profile (not an account balance) ----
       - key: STARTING_EQUITY
-        value: "20"
+        value: "1000"
       - key: MIN_TRADE_USD
-        value: "5"
+        value: "10"
+      - key: MAX_TRADE_USD
+        value: "25"
+      - key: PER_TRADE_RISK_PCT
+        value: "0.01"
       - key: MAX_POSITION_PCT
-        value: "1.0"
+        value: "0.10"
       - key: MAX_PORTFOLIO_RISK_PCT
-        value: "1.0"
+        value: "0.40"
+      - key: MAX_DAILY_DRAWDOWN_PCT
+        value: "0.05"
+      - key: SOFT_BRAKE_DRAWDOWN_PCT
+        value: "0.025"
       - key: MIN_SIGNAL_CONFIDENCE
-        value: "0.72"
+        value: "0.65"
       - key: TRADE_UNIVERSE
         value: BTC-USD,ETH-USD,SOL-USD
       - key: STRATEGY

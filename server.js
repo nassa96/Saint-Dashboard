@@ -19,6 +19,7 @@ const { buildSeries } = require("./src/backtest/history");
 const analytics = require("./src/analytics/analytics");
 const strategyFacade = require("./src/signals/strategy");
 const Auth = require("./src/auth/auth");
+const { assessLiveReadiness } = require("./src/ops/liveReadiness");
 const log = require("./src/util/logger");
 
 const app = express();
@@ -35,9 +36,11 @@ app.post("/api/login", (req, res) => {
     return res.status(401).json({ error: "invalid credentials" });
   }
   const token = auth.issueToken(user);
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  const secureCookie = req.secure || forwardedProto === "https";
   res.setHeader(
     "Set-Cookie",
-    `saint_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=43200`
+    `saint_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=43200${secureCookie ? "; Secure" : ""}`
   );
   res.json({ token });
 });
@@ -175,38 +178,66 @@ app.post("/api/hyperliquid/order", async (req, res) => {
   }
 });
 
-// ---- Live trading arm / disarm (the one-click kill switch) ----
+// ---- Live trading readiness / arm / disarm ----
+app.get("/api/live/readiness", (req, res) => {
+  res.json(assessLiveReadiness(config, engine, auth));
+});
+
 app.get("/api/live/status", (req, res) => {
   const s = config.liveStatus();
   res.json({
     ...s,
     authEnabled: auth.enabled,
     primaryConnected: engine.exchanges.venues[s.primary]?.hasCredentials() || false,
+    balanceVerification: engine.exchanges.getBalanceVerification(s.primary),
+    readiness: assessLiveReadiness(config, engine, auth),
   });
 });
 
-app.post("/api/live/arm", (req, res) => {
+app.post("/api/live/arm", async (req, res) => {
+  // Even the explicit dashboard arm cannot bypass the deployment locks,
+  // authentication, balance verification, or known execution-safety gaps.
+  const before = assessLiveReadiness(config, engine, auth);
+  if (!config.liveGateConfigured()) {
+    return res.status(423).json({ error: "Live deployment locks are not satisfied.", readiness: before });
+  }
+  if (!auth.enabled || String(config.auth.password || "").length < 16 || String(config.auth.sessionSecret || "").length < 32) {
+    return res.status(423).json({ error: "Set a strong DASHBOARD_PASSWORD (at least 16 characters) and stable SESSION_SECRET (at least 32 characters) before arming.", readiness: before });
+  }
+  if (req.body?.confirm !== "I ACCEPT THE RISK") {
+    return res.status(400).json({ error: "confirmation phrase must be exactly: I ACCEPT THE RISK", readiness: before });
+  }
+
+  const primary = engine.exchanges.primary;
+  const venue = engine.exchanges.venues[primary];
+  if (!venue?.hasCredentials()) {
+    return res.status(423).json({ error: `Connect ${primary} API credentials before arming.`, readiness: before });
+  }
   try {
-    const primary = config.exchanges.primary;
-    const connected = engine.exchanges.venues[primary]?.hasCredentials();
-    if (!connected) {
-      return res.status(400).json({ error: `Connect ${primary} API keys before arming live trading.` });
-    }
-    config.armLive(req.body?.confirm || "");
-    const warnings = [];
-    if (config.useTestnet) warnings.push("USE_TESTNET is true — orders go to the TESTNET, not real markets. Set USE_TESTNET=false for real trading.");
-    if (!auth.enabled) warnings.push("DASHBOARD_PASSWORD is not set — anyone who can reach this page can control live trading. Set it now.");
-    log.warn("SERVER", "LIVE TRADING ARMED via dashboard");
-    res.json({ ...config.liveStatus(), warnings });
+    // Authenticated read-only balance request: public endpoint reachability
+    // alone is not proof that the supplied private key works.
+    await engine.exchanges.getBalances(primary);
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    return res.status(423).json({ error: `Authenticated ${primary} balance verification failed: ${e.message}`, readiness: assessLiveReadiness(config, engine, auth) });
+  }
+
+  const readiness = assessLiveReadiness(config, engine, auth);
+  if (!readiness.canArm) {
+    return res.status(423).json({ error: readiness.summary, readiness });
+  }
+  try {
+    config.armLive(req.body.confirm);
+    log.warn("SERVER", "LIVE TRADING ARMED via dashboard");
+    res.json({ ...config.liveStatus(), readiness: assessLiveReadiness(config, engine, auth) });
+  } catch (e) {
+    res.status(400).json({ error: e.message, readiness });
   }
 });
 
 app.post("/api/live/disarm", (req, res) => {
   config.disarmLive();
   log.warn("SERVER", "LIVE TRADING DISARMED via dashboard");
-  res.json(config.liveStatus());
+  res.json({ ...config.liveStatus(), readiness: assessLiveReadiness(config, engine, auth) });
 });
 
 // Backtest the live strategy over historical data

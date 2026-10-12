@@ -219,6 +219,14 @@ class RiskManager {
     const roomPortfolio = Math.max(0, maxPortfolio - currentExposure);
     let maxNotional = Math.min(roomSymbol, roomPortfolio);
 
+    // Bound each individual entry as well as aggregate exposure. This is a
+    // notional cap, not a loss-at-risk calculation: the spot execution path
+    // does not attach exchange-native stop orders.
+    const perTradeCapPct = Number(this.cfg.perTradeRiskPct);
+    if (Number.isFinite(perTradeCapPct) && perTradeCapPct > 0) {
+      maxNotional = Math.min(maxNotional, equity * perTradeCapPct * sizeFactor);
+    }
+
     // Micro-capital cold-start mode: absolute dollar ceiling, independent of
     // (and tighter than, when configured) the percentage-based caps above.
     if (Number(this.cfg.maxTradeUsd) > 0) {

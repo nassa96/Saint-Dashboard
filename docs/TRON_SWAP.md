@@ -27,5 +27,6 @@ To enable real Tron swaps:
 3. Ask me to wire `TronWallet.quote()` / `.swap()` to that provider's real
    endpoints — same pattern as `src/wallet/evm.js` (0x) and
    `src/wallet/solana.js` (Jupiter): a `quote()` that's always safe to
-   call, and a `swap()` gated behind the existing three-lock live-arm +
-   `ONCHAIN_TRADING_ENABLED=true` + `MAX_SWAP_USD` cap.
+   call, and a `swap()` gated behind the deployment locks, fresh dashboard arm,
+   `ONCHAIN_TRADING_ENABLED=true`, and `MAX_SWAP_USD` cap. Live funds remain
+   NO-GO until the readiness blockers in `LIVE_READINESS.md` are resolved.

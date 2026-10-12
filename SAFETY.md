@@ -1,44 +1,60 @@
-# SAFETY & LIVE-LAUNCH CHECKLIST
+# SAFETY & LIVE-READINESS CHECKLIST
 
-This system can place **real orders with real money**. Treat it accordingly.
-Read this whole file before you set `TRADING_MODE=LIVE`.
+This repository contains code paths capable of sending **real orders**. Treat
+it accordingly. No strategy can promise profit; crypto can lose the full amount
+committed.
 
----
+## Current release verdict: NO-GO for live funds
 
-## The three-lock live gate (defense in depth)
+The supported rollout is **PAPER only**. The dashboard's `/api/live/arm`
+endpoint intentionally refuses to arm because this build does not yet reconcile
+exchange balances/positions, consistently confirm final/partial fills and
+recover ambiguous order timeouts, or protect live positions with exchange-native
+stops. A local paper ledger is not a live account ledger. Aegis's drawdown
+calculation therefore is not a broker-side live-funds kill switch.
 
-A live order can only ever be sent when **all three** are true at once:
+A Kraken key showing reachable or returning balances confirms only a read-only
+API call. It does **not** verify order permissions, market-order semantics,
+withdrawal restrictions, symbol filters, fills, or production readiness. The
+new **Live funds readiness audit** (`GET /api/live/readiness`) lists these
+blockers explicitly; do not bypass it or test with money.
+
+## Defense-in-depth arm gates
+
+If/when the remaining execution controls are implemented and independently
+validated, a live session will require all of the following:
 
 1. `TRADING_MODE=LIVE`
-2. `LIVE_TRADING_ENABLED=true`
+2. `LIVE_TRADING_ENABLED=true` (master deployment kill switch)
 3. `LIVE_TRADING_CONFIRM=I ACCEPT THE RISK` (exact string)
+4. A fresh in-process confirmation from the authenticated dashboard
+5. Every blocking item in `/api/live/readiness` passing
 
-This is enforced in one place — `config.canTradeLive()` — and checked again in
-`ExchangeManager.routeLiveOrder()`. If any lock is missing, every order is
-refused before it can reach an exchange and the engine falls back to the paper
-ledger. **Do not weaken this gate.**
+The deployment locks are necessary but not sufficient. A runtime arm cannot
+bypass them, a disabled master switch blocks an already-armed session, and an
+arm is never restored after a process restart. `POST /api/engine/stop` also
+closes the runtime arm. The current readiness report still has hard blockers,
+so the API must refuse live arming.
 
-The dashboard shows a red **`⚠ LIVE ARMED`** badge whenever the gate is open.
+`USE_TESTNET=true` is **not** a universal safety guarantee. This code's Kraken
+spot and Binance.US connectors still target production endpoints; Coinbase
+sandbox execution is not validated and its price feed remains production data.
+The readiness audit calls out venue/mode mismatches.
 
----
+## Supported rollout path
 
-## Recommended path to going live
-
-1. **Run PAPER for a meaningful period.** Watch the equity curve, fills, and
-   drawdown behaviour on real LIVE market data (deploy where the server has
-   internet so the feed reads `DATA: LIVE`, not `SIM`).
-2. **Create API keys with least privilege.**
-   - Start with **read-only** keys to confirm balances load
-     (`/api/exchanges/balances`). No trade permission yet.
-   - When ready, issue **trade-enabled but withdrawal-DISABLED** keys.
-   - **IP-allowlist** the keys to your server's IP.
-3. **Fund small.** Start with an amount you are fully prepared to lose.
-4. **Tighten risk in `.env`** before arming:
-   - `MAX_POSITION_PCT`, `MAX_PORTFOLIO_RISK_PCT`
-   - `MAX_DAILY_DRAWDOWN_PCT` (the circuit breaker halts trading for the day)
-   - `MIN_SIGNAL_CONFIDENCE` (higher = fewer, higher-conviction trades)
-5. **Arm the three locks**, restart, and confirm the `⚠ LIVE ARMED` badge.
-6. **Watch it.** Do not leave an armed system unattended until you trust it.
+1. Keep all live locks OFF. Run PAPER on a host with internet and confirm every
+   tracked price reads `LIVE` (never assume sandbox `SIM` prices are real).
+2. Use the dashboard with password authentication, HTTPS, and restricted
+   access. For a small tester group, use a private, isolated PAPER instance;
+   the product currently has no per-user accounts or tenant isolation.
+3. Review paper fills, fees, drawdown, logs, and validation results for multiple
+   weeks. Do not infer an edge from a synthetic run or a short profitable streak.
+4. Connect read-only keys only when needed to verify balances. Do not enable
+   trading permissions for this release. Never paste secrets into chat.
+5. Revisit live deployment only after the readiness report can pass and the
+   remaining controls below are implemented and tested with venue sandboxes or
+   a vendor-approved non-production environment.
 
 ---
 
@@ -56,16 +72,22 @@ Kraken) and, if you choose to configure them, **self-custody wallet keys**
 (Solana, EVM/Ethereum+Base+BNB, Tron) read from your own local `.env` file.
 In every case:
 - API keys should be created **without withdrawal permission**, so the
-  software cannot move funds off the exchange.
+  software cannot move funds off the exchange. Verify this setting directly
+  at the venue; Saint cannot inspect key scopes from a balance response.
+- Exchange keys entered through `/connect.html` are stored as plaintext in
+  `data/credentials.json` on the server (git-ignored; file mode is restricted
+  where the host supports it). `.env` is also supported. Treat the host and
+  backups as secret-bearing systems; prefer a secrets manager for production.
 - Wallet private keys are **never accepted through any web form** — only
   `.env` file entries you control, on your own machine/server. The
   Connections page (`/connect.html`) only ever asks a browser-injected
   wallet (MetaMask/Coinbase Wallet/Trust Wallet/Phantom) for a **public
   address**, never a key or signature.
-- On-chain swaps (Solana via Jupiter, EVM via 0x) are real but gated behind
-  the same three-lock live gate **plus** `ONCHAIN_TRADING_ENABLED=true` and a
-  `MAX_SWAP_USD` cap, with MEV-defense tranching for larger/riskier swaps.
-  Tron swaps are intentionally left disabled (see `docs/TRON_SWAP.md`).
+- On-chain swaps (Solana via Jupiter, EVM via 0x) have real broadcast code
+  gated behind the deployment locks **plus** runtime arm,
+  `ONCHAIN_TRADING_ENABLED=true`, and a `MAX_SWAP_USD` cap. They are not part
+  of the supported PAPER tester rollout and have not been certified here.
+  Tron swaps are intentionally disabled (see `docs/TRON_SWAP.md`).
 
 ## Leveraged / perps risk (HyperLiquid, DNFH)
 
@@ -92,18 +114,26 @@ the single most common structure behind crypto advance-fee scams: a small
 deposit, a promise of automated compounding, and urgency language pushing
 you to act before you think it through ("I'm standing by," "final
 transmission," flattery about being an "overlord" or uniquely chosen).
-Nothing in this app ever needs you to do that — every real-money action
-here uses **your own** wallet/exchange keys, stored only in your local
-`.env`, and every write path is gated behind the live-arm lock above. If a
-plan can't be executed with your own keys through this app's existing gated
-endpoints, be suspicious of why it's asking for funds up front instead.
+Nothing in this app ever needs you to do that — any eventual real-money action
+must use **your own** wallet/exchange keys held on your server, and every write
+path must remain behind the live-arm locks. If a plan can't be executed with
+your own keys through the app's documented endpoints, be suspicious of why it
+is asking for funds up front instead.
 
 ## Known limitations (be honest with yourself)
 
 - Signals are **technical heuristics**, not forecasts. They can and will be wrong.
-- Backtesting/optimization is not included — validate live-forward in PAPER.
-- Exchange connectors implement market orders + balances; extend/validate order
-  types, symbol mapping, and rounding for your venue before trusting size.
+- Backtesting, optimization, and validation tools exist, but a backtest is not
+  evidence of future returns. The app does not record an independently audited
+  multi-week paper-forward approval.
+- The live account is not reconciled to the local ledger; final/partial fills,
+  open orders, ambiguous timeouts, exchange-specific filters, and broker-side
+  protective stops are not production-certified. That is why live arming is
+  currently blocked.
+- `PER_TRADE_RISK_PCT` is a **per-entry notional cap**, not loss-at-risk.
+  There is no exchange-native stop-loss attached to spot orders.
+- The `MarketData` service reads Coinbase public spot prices. Other execution
+  venues may diverge in price, liquidity, or product rules.
 - The memecoin radar is a **discovery/scoring** tool, not a buy signal, and does
   not auto-trade. Memecoins are extremely high-risk (rugs, honeypots, thin
   liquidity). The radar flags common risks but cannot guarantee safety.
@@ -122,30 +152,26 @@ it to anything beyond `localhost`:
 
 Auth protects both the REST API and the live WebSocket stream.
 
-## Automatic survivability breakers (beyond the daily-drawdown halt)
+## PAPER-mode risk controls (not live-account protection)
 
-Three additional, always-on protections that don't require you to do anything:
+The engine includes per-entry notional caps, volatility-regime sizing, a
+market-wide stress pause, and local-ledger drawdown halts. These can reduce
+PAPER exposure, but they are **not** exchange-side protection. A process stop,
+network outage, stale account ledger, or unconfirmed fill can leave a real
+venue position untouched. Do not infer live-funds protection from the Aegis UI.
 
-1. **Volatility-regime sizing.** The Extreme Volatility Radar's read for each
-   symbol now directly shrinks position size (down to ~30% in an EXTREME
-   regime) and raises the confidence bar required to open a NEW position
-   there — instead of only showing a badge. Exits are never affected.
-2. **Market-wide stress halt.** If `MAX_EXTREME_FRACTION_FOR_HALT` (default
-   50%) or more of the tracked universe is simultaneously reading EXTREME at
-   once, new entries pause across the board until it passes. Unlike the
-   daily-drawdown breaker this is precautionary (no loss has necessarily
-   happened) and auto-clears the same day once conditions calm down.
-3. **Non-LIVE price gate.** Even with the three-lock live gate fully armed,
-   the engine checks the price source for the specific symbol it's about to
-   trade. If that symbol's feed is unreachable and running on the SIM
-   fallback, the real order is refused and it falls back to the paper ledger
-   — it will never place a live order against a fabricated/stale price.
-
-None of these three can be bypassed by config; they're load-bearing safety
-logic, not optional alerts.
+Before any fill, the engine requires a fresh per-symbol LIVE public quote.
+PAPER mode skips SIM/unknown/stale quotes without creating a fill; an armed
+live request latches a safety fault, disarms, and stops on the same condition.
+An ambiguous live-order error also fails closed; inspect and reconcile the
+exchange manually before any restart. This local behavior still does not
+replace venue-native stops.
 
 ## Kill switch
 
-To stop everything instantly: set `LIVE_TRADING_ENABLED=false` and restart, or
-`POST /api/engine/stop`, or just stop the process. The daily-drawdown breaker
-also auto-halts new trades if losses exceed `MAX_DAILY_DRAWDOWN_PCT`.
+`POST /api/engine/stop` stops scheduled ticks **and disarms the runtime live
+arm**. It does not cancel an order already accepted by an exchange, close an
+exchange position, or guarantee an in-flight request has been canceled. To
+change the deployment kill switch, set `LIVE_TRADING_ENABLED=false` and restart
+the process. If the venue shows an open/unknown order, manage it directly at
+the venue; do not assume the local paper book is authoritative.

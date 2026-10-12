@@ -123,6 +123,100 @@
     .navitem{white-space:nowrap}
   }
   @media(max-width:1000px){.grid>*{grid-column:span 12!important}}
+
+  /* Refined trading cockpit layer: calmer contrast, clearer hierarchy, and
+     responsive operational status without replacing the existing panels. */
+  :root{
+    --bg:#080d16; --panel:#0d1522; --panel2:#111d2d; --line:#22324a;
+    --txt:#e5edf9; --muted:#91a1ba; --green:#55e6bb; --red:#ff7187;
+    --amber:#f2bd69; --blue:#78b8ff; --purple:#b5a1ff;
+  }
+  body{
+    background:
+      radial-gradient(900px 500px at 82% -18%,rgba(66,118,190,.19),transparent 65%),
+      radial-gradient(700px 420px at -15% 20%,rgba(42,125,121,.08),transparent 70%),
+      var(--bg);
+    color:var(--txt);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:13px;line-height:1.5;letter-spacing:.01em
+  }
+  code,.tag,.badge,th,.mini,.log{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  a{color:#91c6ff}
+  button,select,input{font:inherit}
+  :focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+  .header{padding:13px clamp(14px,2vw,28px);gap:18px;border-color:rgba(128,157,196,.15);
+    background:rgba(7,12,21,.88);box-shadow:0 12px 36px rgba(0,0,0,.16)}
+  .brand{gap:11px;min-width:max-content}
+  .logo{width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,#62edc3,#78b8ff);
+    box-shadow:0 5px 22px rgba(85,230,187,.19)}
+  .title{font-size:15px;letter-spacing:2.5px}
+  .sub{margin-top:2px;font:10px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:1.1px}
+  .badges{justify-content:center;gap:6px}
+  .badge{padding:5px 9px;background:rgba(16,27,42,.72);border-color:rgba(128,157,196,.22);font-size:10px;letter-spacing:.45px}
+  .b-live{box-shadow:none;background:rgba(85,230,187,.08)}
+  .b-armed{box-shadow:none;background:rgba(255,113,135,.09)}
+  .sidebar{width:220px;flex-basis:220px;padding:20px 12px;top:64px;height:calc(100vh - 64px);
+    border-color:rgba(128,157,196,.13);background:rgba(8,14,24,.42)}
+  .navgroup{margin-bottom:20px}
+  .navgroup .navlabel{font-size:9px;letter-spacing:1.65px;padding:0 11px;color:#74859e}
+  .navitem{padding:10px 11px;border-radius:9px;font-size:11px;color:#9aa9bf}
+  .navitem:hover{background:rgba(120,184,255,.07)}
+  .navitem.active{background:linear-gradient(90deg,rgba(85,230,187,.13),rgba(85,230,187,.035));border-color:rgba(85,230,187,.22)}
+  .content{min-height:calc(100vh - 64px)}
+  .grid{gap:16px;padding:20px clamp(14px,2vw,28px)}
+  .card{padding:18px;background:linear-gradient(160deg,rgba(17,29,45,.96),rgba(12,20,32,.96));
+    border:1px solid rgba(128,157,196,.17);border-radius:16px;box-shadow:0 10px 26px rgba(0,0,0,.13)}
+  .card h3{font-size:10px;letter-spacing:1.35px;color:#a2b1c6;margin-bottom:14px}
+  .kpi{font-size:29px;letter-spacing:-.035em;font-variant-numeric:tabular-nums}
+  .kpi.small{font-size:18px;letter-spacing:-.01em}
+  .span3 .mini{line-height:1.7}
+  th{font-size:9px;letter-spacing:1.1px;color:#8192aa;padding:9px 8px}
+  td{padding:9px 8px;border-bottom-color:rgba(128,157,196,.1);font-variant-numeric:tabular-nums}
+  tr:hover td{background:rgba(120,184,255,.045)}
+  .mini{font-size:10px;line-height:1.55;color:#8b9bb3}
+  .mini-btn{padding:6px 10px;border-color:rgba(120,184,255,.55);background:rgba(120,184,255,.045);font-size:10px;transition:background .15s,border-color .15s,transform .15s}
+  .mini-btn:hover{background:rgba(120,184,255,.12);transform:translateY(-1px)}
+  .mini-btn.go{border-color:rgba(85,230,187,.55);background:rgba(85,230,187,.05)}
+  .mini-btn.danger{border-color:rgba(255,113,135,.65);background:rgba(255,113,135,.055)}
+  .live-pill{margin-left:6px;padding:6px 11px;font-size:10px;letter-spacing:.7px}
+  .live-pill.paper{color:var(--green);background:rgba(85,230,187,.07)}
+  .warnbox{background:rgba(242,189,105,.075);border-color:rgba(242,189,105,.55);color:#f2c97f;padding:10px 13px}
+  .infobox{background:rgba(120,184,255,.055);border-color:rgba(120,184,255,.23);border-radius:10px;padding:10px 12px}
+  .hero{min-height:146px;display:flex;align-items:center;justify-content:space-between;gap:24px;position:relative;
+    background:linear-gradient(112deg,rgba(16,38,53,.98),rgba(15,27,43,.94) 55%,rgba(23,37,59,.96));}
+  .hero:after{content:"";position:absolute;right:-65px;top:-105px;width:330px;height:290px;border-radius:50%;
+    background:radial-gradient(circle,rgba(85,230,187,.12),transparent 68%);pointer-events:none}
+  .hero-copy,.hero-meta{position:relative;z-index:1}
+  .hero-kicker{font:10px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--green);letter-spacing:1.7px;text-transform:uppercase}
+  .hero h1{margin:7px 0 6px;font-size:clamp(23px,3vw,34px);letter-spacing:-.045em;line-height:1.1}
+  .hero-copy p{margin:0;max-width:720px;color:#a6b6ca;font-size:12px}
+  .hero-meta{text-align:right;min-width:155px}
+  .hero-meta strong{display:block;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#dce8f7;letter-spacing:.6px}
+  .readiness-card{border-color:rgba(255,113,135,.27);background:linear-gradient(135deg,rgba(34,23,36,.72),rgba(15,24,38,.98) 50%)}
+  .readiness-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+  .readiness-title{display:flex;align-items:center;gap:10px}
+  .readiness-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:rgba(255,113,135,.11);color:var(--red);font-size:17px}
+  .readiness-state{font-size:13px;font-weight:800;letter-spacing:.4px;color:var(--red)}
+  .readiness-summary{margin:4px 0 14px;color:#aebbd0;font-size:11px}
+  .readiness-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .readiness-check{display:flex;gap:9px;padding:10px 11px;border:1px solid rgba(128,157,196,.13);border-radius:10px;background:rgba(5,11,19,.25);min-width:0}
+  .readiness-mark{flex:0 0 18px;font-weight:800;text-align:center}
+  .readiness-check[data-status="pass"] .readiness-mark{color:var(--green)}
+  .readiness-check[data-status="blocked"] .readiness-mark{color:var(--red)}
+  .readiness-check[data-status="required"] .readiness-mark,.readiness-check[data-status="pending"] .readiness-mark{color:var(--amber)}
+  .readiness-check strong{display:block;color:#d7e2f1;font:600 10px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.25px}
+  .readiness-check span{display:block;color:#93a3b9;font-size:10px;line-height:1.45;margin-top:3px;overflow-wrap:anywhere}
+  .readiness-foot{margin-top:11px;color:#8192aa;font:9px ui-monospace,SFMono-Regular,Menlo,monospace}
+  @media(max-width:1050px){.header{flex-wrap:wrap}.header .badges{order:3;justify-content:flex-start;width:100%}}
+  @media(max-width:900px){
+    .appwrap{flex-direction:column}.sidebar{width:100%;flex:none;height:auto;position:relative;top:0;border-right:none;
+      border-bottom:1px solid var(--line);display:flex;overflow-x:auto;padding:8px 10px;background:rgba(8,14,24,.8)}
+    .navgroup{display:flex;margin-bottom:0;margin-right:10px}.navgroup .navlabel{display:none}.navitem{white-space:nowrap}
+  }
+  @media(max-width:620px){
+    .header{align-items:flex-start}.brand{min-width:0}.header>div:last-child{width:100%;justify-content:flex-start;flex-wrap:wrap}
+    .hero{align-items:flex-start;flex-direction:column}.hero-meta{text-align:left}.readiness-checks{grid-template-columns:1fr}
+    .card{padding:15px}.grid{padding:12px;gap:12px}
+  }
 </style>
 </head>
 <body>
@@ -186,14 +280,39 @@
       <!-- ===================== OVERVIEW ===================== -->
       <div class="tab-pane active" data-pane="overview">
         <div class="grid">
+          <div class="card span12 hero">
+            <div class="hero-copy">
+              <div class="hero-kicker">SAINT CORE · Trading cockpit</div>
+              <h1>Portfolio overview</h1>
+              <p>Signals, exposure, and system health in one place. Paper mode is the supported test rollout; performance is not guaranteed and no live session is considered ready until every operational gate is verified.</p>
+            </div>
+            <div class="hero-meta">
+              <strong id="hero-feed-status">MARKET DATA · —</strong>
+              <span class="mini" id="hero-last-update">Waiting for first update…</span>
+            </div>
+          </div>
+
+          <div class="card span12 readiness-card" id="readiness-card">
+            <div class="readiness-head">
+              <div class="readiness-title">
+                <div class="readiness-icon">!</div>
+                <div><h3 style="margin:0 0 3px">Live funds readiness audit</h3><div class="readiness-state" id="readiness-state">AUDIT LOADING</div></div>
+              </div>
+              <button class="mini-btn" onclick="loadReadiness()">Refresh audit</button>
+            </div>
+            <div class="readiness-summary" id="readiness-summary">Checking operational gates…</div>
+            <div class="readiness-checks" id="readiness-checks"></div>
+            <div class="readiness-foot">A connected key or positive backtest is not proof of live readiness. This dashboard does not promise returns.</div>
+          </div>
+
           <div class="card span3"><h3>Equity</h3><div class="kpi" id="k-equity">—</div><div class="mini" id="k-equity-sub">—</div></div>
           <div class="card span3"><h3>Total PnL</h3><div class="kpi" id="k-pnl">—</div><div class="mini" id="k-pnl-sub">realized / cash</div></div>
           <div class="card span3"><h3>Cycle</h3><div class="kpi" id="k-cycle">—</div><div class="mini" id="k-mode">—</div></div>
-          <div class="card span3"><h3>Aegis Risk State</h3><div class="kpi small" id="k-risk">—</div><div class="mini" id="k-risk-sub">—</div></div>
+          <div class="card span3"><h3>Risk State · PAPER ledger</h3><div class="kpi small" id="k-risk">—</div><div class="mini" id="k-risk-sub">—</div></div>
 
           <div class="card span8"><h3>Equity Curve <span class="mini" id="curve-src"></span></h3><canvas id="curve"></canvas></div>
 
-          <div class="card span4"><h3>Aegis Guardian — Two-Tier Drawdown</h3>
+          <div class="card span4"><h3>Aegis · PAPER-ledger risk controls</h3>
             <div id="aegis-detail" class="mini">—</div>
           </div>
 
@@ -395,7 +514,7 @@
       <div class="tab-pane" data-pane="exchanges">
         <div class="grid">
           <div class="card span5"><h3>Exchange Connectivity</h3>
-            <table><thead><tr><th>Venue</th><th>Keys</th><th>Reachable</th><th>Note</th></tr></thead>
+            <table><thead><tr><th>Venue</th><th>Keys</th><th>Public API</th><th>Balance read</th><th>Note</th></tr></thead>
             <tbody id="exchanges"></tbody></table>
             <div class="mini" style="margin-top:8px" id="live-note"></div>
           </div>
@@ -473,6 +592,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const fmt = (n, d=2) => n==null||isNaN(n) ? "—" : Number(n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
 const money = (n) => n==null?"—":"$"+fmt(n);
 const pct = (n) => n==null?"—":(n>=0?"+":"")+fmt(n)+"%";
@@ -525,6 +645,8 @@ function populateUniverseSelects(symbols){
 function render(d){
   badges(d);
   populateUniverseSelects((d.market.symbols||[]).map(s=>s.symbol));
+  $("hero-feed-status").innerText = `MARKET DATA · ${d.dataSource || "UNKNOWN"} · ENGINE ${d.running ? "RUNNING" : "IDLE"}`;
+  $("hero-last-update").innerText = `Cycle ${d.cycle ?? "—"} · updated ${new Date(d.ts || Date.now()).toLocaleTimeString()}`;
 
   // sim note
   if(d.dataSource!=='LIVE'){
@@ -540,9 +662,12 @@ function render(d){
   $("k-cycle").innerText=d.cycle;
   $("k-mode").innerText=`${d.mode} · ${d.running?'RUNNING':'IDLE'}`;
 
-  // Aegis two-tier risk state
+  // Aegis two-tier risk state + fail-closed live execution fault
   const r=d.risk||{};
-  if(r.halted){
+  if(d.liveExecutionFault){
+    $("k-risk").innerHTML = '<span class="neg">LIVE HALTED</span>';
+    $("k-risk-sub").innerText = d.liveExecutionFault.status || 'manual venue reconciliation required';
+  } else if(r.halted){
     $("k-risk").innerHTML = '<span class="neg">HARD HALT</span>';
     $("k-risk-sub").innerText = r.haltReason || '—';
   } else if(r.softBraked){
@@ -553,7 +678,8 @@ function render(d){
     $("k-risk-sub").innerText = `dd limit ${((r.limits?.maxDailyDrawdownPct||0)*100).toFixed(0)}% · maxpos ${((r.limits?.maxPositionPct||0)*100).toFixed(0)}%`;
   }
   $("aegis-detail").innerHTML = `
-    <div>Hard killswitch: ${r.halted?'<span class="neg">HALTED</span>':'<span class="pos">clear</span>'} ${r.haltUntil?`<span class="mini">(clears ${new Date(r.haltUntil).toLocaleString()})</span>`:''}</div>
+    ${d.liveExecutionFault?`<div><span class="neg">LIVE EXECUTION FAULT:</span> ${esc(d.liveExecutionFault.message)}</div>`:''}
+    <div>Local hard halt (PAPER ledger): ${r.halted?'<span class="neg">HALTED</span>':'<span class="pos">clear</span>'} ${r.haltUntil?`<span class="mini">(clears ${new Date(r.haltUntil).toLocaleString()})</span>`:''}</div>
     <div style="margin-top:4px">Soft brake (5% dd): ${r.softBraked?'<span class="warn-txt">ACTIVE — size ×0.5, leverage cap 1x</span>':'<span class="mut">inactive</span>'}</div>
     <div style="margin-top:4px">Market-wide stress halt: ${r.stressHalted?'<span class="neg">ACTIVE</span>':'<span class="pos">clear</span>'} <span class="mini">(${r.stress?.extremeCount||0}/${r.stress?.total||0} symbols EXTREME)</span></div>
     <div style="margin-top:4px" class="mini">Max leverage cap right now: <b>${r.maxLeverageCap===Infinity||r.maxLeverageCap==null?'unconstrained':r.maxLeverageCap+'x'}</b></div>
@@ -659,7 +785,8 @@ function render(d){
     <td>${k}${k===ex.primary?' <span class="mini">(primary)</span>':''}</td>
     <td>${v.hasCredentials?'<span class="pos">yes</span>':'<span class="mut">none</span>'}</td>
     <td>${v.reachable?'<span class="pos">✓</span>':'<span class="neg">✗</span>'}</td>
-    <td class="mini">${v.error?v.error.slice(0,28):(v.reachable?'ok':'—')}</td></tr>`).join("");
+    <td>${v.balanceVerification?.verified?`<span class="pos">✓ ${new Date(v.balanceVerification.verifiedAt).toLocaleTimeString()}</span>`:'<span class="mut">not verified</span>'}</td>
+    <td class="mini">${v.error?esc(v.error.slice(0,48)):(v.reachable?'public API ok':'—')}</td></tr>`).join("");
   $("live-note").innerHTML = ex.canTradeLive
     ? '<span class="neg">⚠ LIVE ORDER ROUTING ARMED</span>'
     : 'Live routing disarmed · testnet='+ex.useTestnet+' · orders run in PAPER ledger';
@@ -1092,22 +1219,57 @@ async function disconnectVenue(name){
   try{ await fetch('/api/exchanges/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({venue:name})}); loadExchangeBalances(); }catch(e){alert(e.message);}
 }
 
+// ---- Live-funds go/no-go audit ----
+function renderReadiness(report){
+  if(!report)return;
+  const ready=report.canArm===true;
+  $("readiness-state").innerText=ready?'LIVE ARM CHECKS PASSED':'NOT READY FOR LIVE FUNDS';
+  $("readiness-state").style.color=ready?'var(--green)':'var(--red)';
+  $("readiness-card").style.borderColor=ready?'rgba(85,230,187,.3)':'rgba(255,113,135,.3)';
+  $("readiness-summary").innerText=report.summary||'Readiness result unavailable.';
+  const glyph={pass:'✓',blocked:'×',required:'!',pending:'·'};
+  $("readiness-checks").innerHTML=(report.checks||[]).map(c=>`
+    <div class="readiness-check" data-status="${esc(c.status)}">
+      <div class="readiness-mark">${glyph[c.status]||'·'}</div>
+      <div><strong>${esc(c.label)}${c.blocking?' · required':''}</strong><span>${esc(c.detail)}</span></div>
+    </div>`).join('');
+  const stamp=report.asOf?new Date(report.asOf).toLocaleTimeString():'—';
+  $("readiness-card").setAttribute('aria-label',`${ready?'Live checks passed':'Not ready for live funds'}. ${report.blockers?.length||0} blockers. Updated ${stamp}.`);
+}
+async function loadReadiness(){
+  $("readiness-summary").innerText='Refreshing operational checks…';
+  try{
+    const r=await guardedFetch('/api/live/readiness');
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||`readiness HTTP ${r.status}`);
+    renderReadiness(d);
+  }catch(e){
+    $("readiness-state").innerText='AUDIT UNAVAILABLE';
+    $("readiness-summary").innerText=e.message;
+  }
+}
+
 // ---- Live trading arm/disarm + engine start/stop ----
 async function loadLive(){
   try{
-    const r=await fetch('/api/live/status'); const s=await r.json();
+    const r=await guardedFetch('/api/live/status'); const s=await r.json();
     const armed = s.canTradeLive;
-    $("live-card").style.borderColor = armed ? 'rgba(255,77,109,.7)' : 'var(--line)';
+    const readyToArm = s.readiness?.canArm === true;
+    if(s.readiness)renderReadiness(s.readiness);
+    $("live-card").style.borderColor = armed ? 'rgba(255,113,135,.7)' : 'var(--line)';
     $("live-status").innerHTML = `
-      <span class="tag ${armed?'t-rejected':'t-approved'}">${armed?'🔴 LIVE — REAL ORDERS':'🟢 PAPER (safe)'}</span>
-      <span class="mini"> · ${s.primary} ${s.primaryConnected?'connected':'not connected'} · ${s.useTestnet?'TESTNET':'real markets'} · ${s.authEnabled?'password set':'⚠ no dashboard password'}</span>
+      <span class="tag ${armed?'t-rejected':'t-approved'}">${armed?'🔴 LIVE ROUTING ARMED':'🟢 PAPER / DISARMED'}</span>
+      <span class="mini"> · ${esc(s.primary)} · credentials ${s.primaryConnected?'present':'missing'} · balance read ${s.balanceVerification?.verified?'verified':'not verified'} · ${s.useTestnet?'USE_TESTNET=true':'production endpoint'} · ${s.authEnabled?'password set':'⚠ no dashboard password'}</span>
       ${s.armedAt?`<div class="mini">armed ${new Date(s.armedAt).toLocaleString()}</div>`:''}
     `;
     if(armed){
-      $("live-controls").innerHTML = `<button class="mini-btn danger" style="font-size:13px;padding:8px 16px" onclick="disarmLive()">■ DISARM — stop live trading now</button>`;
+      $("live-controls").innerHTML = `<button class="mini-btn danger" style="font-size:13px;padding:8px 16px" onclick="disarmLive()">■ DISARM — stop live routing now</button>`;
+    } else if(!readyToArm){
+      const blockers=(s.readiness?.blockers||[]).map(b=>b.label).slice(0,4).join(' · ');
+      $("live-controls").innerHTML = `<div class="warnbox" style="margin:8px 0 0">Live arm is locked. ${esc(blockers||'Refresh the readiness audit for required checks.')}</div>`;
     } else {
       $("live-controls").innerHTML = `
-        <div class="mini" style="margin-bottom:6px">To arm, type the exact phrase <code>I ACCEPT THE RISK</code>:</div>
+        <div class="mini" style="margin-bottom:6px">After readiness passes, type the exact phrase <code>I ACCEPT THE RISK</code>:</div>
         <div class="formrow">
           <input id="arm-phrase" class="mini-input" style="width:220px" placeholder="I ACCEPT THE RISK" autocomplete="off">
           <button class="mini-btn danger" onclick="armLive()">⚡ Arm live trading</button>
@@ -1124,12 +1286,13 @@ async function armLive(){
   if(!confirm('This will place REAL orders with REAL money. Continue?'))return;
   $("live-result").innerHTML = `Arming…`;
   try{
-    const r=await fetch('/api/live/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:confirmPhrase})});
+    const r=await guardedFetch('/api/live/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:confirmPhrase})});
     const d=await r.json();
-    if(d.error){$("live-result").innerHTML=`<span class="neg">⚠ ${d.error}</span>`;}
+    if(d.readiness)renderReadiness(d.readiness);
+    if(d.error){$("live-result").innerHTML=`<span class="neg">⚠ ${esc(d.error)}</span>`;}
     else{
-      $("live-result").innerHTML = `<span class="pos">✅ Live trading ARMED.</span>`;
-      if(d.warnings&&d.warnings.length){$("live-warnbox").style.display='block';$("live-warnbox").innerHTML='⚠ '+d.warnings.join('<br>⚠ ');}
+      $("live-result").innerHTML = `<span class="pos">✅ Live routing armed.</span>`;
+      if(d.warnings&&d.warnings.length){$("live-warnbox").style.display='block';$("live-warnbox").innerHTML='⚠ '+d.warnings.map(esc).join('<br>⚠ ');}
     }
   }catch(e){$("live-result").innerHTML=`<span class="neg">${e.message}</span>`;}
   loadLive();
@@ -1218,6 +1381,7 @@ function guardedFetch(url,opts){
 }
 // initial fetch then live stream
 initTabs();
+loadReadiness();
 guardedFetch('/api/state').then(r=>r.json()).then(render).catch(()=>{});
 connect();
 window.addEventListener('resize',()=>{fetch('/api/state').then(r=>r.json()).then(render).catch(()=>{});});
@@ -1238,6 +1402,7 @@ async function refreshLivePill(){
   }catch(_){}
 }
 refreshLivePill();setInterval(refreshLivePill,7000);
+setInterval(()=>{ if(document.querySelector('.navitem[data-tab="overview"]').classList.contains('active')) loadReadiness(); },30000);
 // Lazily load on-demand panels the first time their tab is shown.
 const __lazyLoaded = {};
 window.addEventListener('saint-tab-shown', (e)=>{

@@ -1,7 +1,9 @@
-# 🚀 SAINT CORE — Launch Runbook (Paper → Live → Scale)
+# SAINT CORE — Controlled Test Rollout Runbook (PAPER only)
 
-**Goal:** give you the best realistic shot at coming out ahead, and make it
-*impossible* to blow up your account on a single bad day.
+**Current release gate: NO-GO for live funds.** This build supports a private
+PAPER rollout while live arming remains intentionally blocked. See
+[`LIVE_READINESS.md`](LIVE_READINESS.md) for the code audit and remaining
+engineering work. No controls can make a bad market or strategy risk-free.
 
 Read the honesty section first. It's the most valuable part.
 
@@ -15,13 +17,12 @@ Read the honesty section first. It's the most valuable part.
 - **What actually decides winners vs. blow-ups** is not the strategy — it's:
   1. Proving an edge exists *before* risking money (walk-forward validation).
   2. Risk control small enough that no single day can wreck you.
-  3. Starting tiny with real money and scaling only on proven results.
-  4. Discipline — letting the rules and kill-switch do their job.
+  3. Staying in PAPER until an independently reviewed edge and execution path exist.
+  4. Using operational controls honestly; a local drawdown guard is not an exchange-side kill switch.
 - **This dashboard runs on `SIM` data in an offline sandbox.** Real prices only
   flow when you run it on a machine with internet (your PC or a VPS). Validate
   and paper-trade *there*, not in the sandbox.
-- **Only trade money you can afford to lose entirely.** Treat Phase 2 tuition, not
-  income.
+- **Do not trade live funds from this release.** A small deposit is still real money and the current order lifecycle is not certified.
 
 If you internalize only one thing: **survival > returns.** You can't compound if
 you're wiped out.
@@ -65,8 +66,8 @@ Prove the *live* system behaves like the backtest before risking a cent.
 
 1. Pick a risk profile and copy it into `.env`:
    ```bash
-   cp presets/conservative.env .env        # recommended starting point
-   # edit STARTING_EQUITY to your intended real deposit
+   cp presets/conservative.env .env        # conservative PAPER profile
+   # choose a hypothetical PAPER starting equity; this is not synced to an exchange
    ```
 2. Deploy somewhere with internet + uptime (see `DEPLOY.md` — Docker or systemd).
    ```bash
@@ -79,76 +80,48 @@ Prove the *live* system behaves like the backtest before risking a cent.
    - Is max drawdown within what you can stomach?
    - Do the closed trades make sense?
 
-**Gate to Phase 2:** several weeks of paper results that broadly match your
-walk-forward numbers, and drawdown you're emotionally OK with. If paper loses
-money, **do not go live** — fix or stop.
+**Gate to future live-readiness work:** multi-week PAPER results on real data,
+reviewed alongside walk-forward results and costs. Passing that gate does not
+change this release's NO-GO; the engineering blockers in `LIVE_READINESS.md`
+must also be resolved.
 
 ---
 
-## Phase 2 — Go live with a TINY stake (the careful part)
+## Phase 2 — Live funds are currently blocked
 
-Only after Phase 1 passes. Start with an amount whose total loss wouldn't hurt
-(e.g. **$100–300**), regardless of how much you eventually plan to trade.
+Do not add trade-enabled keys, deposit a test stake, or try to bypass the
+readiness gate. `POST /api/live/arm` will refuse until the blockers in
+[`LIVE_READINESS.md`](LIVE_READINESS.md) are resolved. A verified Kraken
+balance read is not a verified order/fill path. In particular, the local PAPER
+ledger is not reconciled with exchange equity/positions and there are no
+exchange-native stops.
 
-### 2a. Exchange setup (read-only first)
-1. Create API keys on your exchange (**Coinbase**, **Kraken**, or **Binance.US**).
-2. **Disable withdrawals** on the key. Enable only *view* + *trade*. Never a key
-   that can move funds off the exchange.
-3. IP-allowlist the key to your VPS IP if the exchange supports it.
-4. Put the keys in `.env` and first verify **read-only**:
-   ```bash
-   curl "http://localhost:3000/api/exchanges/balances?venue=coinbase"
-   ```
-   You should see your real balances. No orders are placed by this.
+Future production work must first add and test account reconciliation,
+venue-specific order filters, final/partial fill handling, duplicate/timeout
+recovery, broker-side protection, a supported sandbox path, and sustained
+real-data PAPER evidence. Only after that should a separate staged live pilot
+be designed and reviewed.
 
-### 2b. Arm live trading (triple-gated on purpose)
-Live orders are refused unless **all three** are true (`config.canTradeLive()`):
+## Phase 3 — Not applicable to this release
 
-```env
-MODE=LIVE
-LIVE_TRADING_ENABLED=true
-LIVE_TRADING_CONFIRM=I ACCEPT THE RISK
-```
+Capital scaling is out of scope until the live readiness report can pass and
+real execution has been independently validated. A favorable backtest or a few
+profitable paper trades is not authorization to scale.
 
-Keep the **conservative** risk caps. Deposit only your tiny stake. Restart.
+## ⏸ Stop / disarm
 
-### 2c. Watch it like a hawk for the first days
-- Confirm the first few live fills match intended size and price.
-- Confirm the **daily-drawdown halt** works (it auto-stops trading at your
-  `MAX_DAILY_DRAWDOWN_PCT`).
-- Keep the **kill-switch** handy (below).
-
-**Gate to Phase 3:** 2–4 weeks of live results that match paper. Real slippage and
-fees always make live slightly worse than paper — make sure it's still positive
-after that friction.
-
----
-
-## Phase 3 — Scale deliberately
-
-- Increase capital in **steps** (e.g. 2×), never all at once.
-- Re-run `npm run validate` periodically — edges decay as regimes change.
-- Consider loosening from `conservative.env` → `balanced.env` only once live
-  results justify it. **Aggressive is for later, if ever.**
-- Add more capital *after* a step proves out, not before.
-
----
-
-## 🔴 Kill switch — stop everything, instantly
-
-Any one of these halts live trading:
+The dashboard stop action clears scheduled engine work and closes the
+in-process arm, but it cannot cancel an exchange-accepted order or flatten a
+venue position. Live funds remain NO-GO in this release.
 
 ```bash
-# Fastest: flip the flag and restart
-#   set LIVE_TRADING_ENABLED=false in .env, then:
-npm run docker:down        # or Ctrl-C / stop the process
-
-# Or via the running engine:
+# Stop the running engine; also disarms its runtime arm
 curl -X POST http://localhost:3000/api/engine/stop
-```
 
-The system **also halts itself automatically** when the daily drawdown limit is
-hit. To flatten to cash and reset the paper book: `POST /api/portfolio/reset`.
+# Set LIVE_TRADING_ENABLED=false in .env before any future restart.
+# This is a PAPER rollout: reset only the local paper ledger if required.
+curl -X POST http://localhost:3000/api/portfolio/reset
+```
 
 ---
 
@@ -159,29 +132,31 @@ hit. To flatten to cash and reset the paper book: `POST /api/portfolio/reset`.
 | Max per coin | 100% | 10% | 20% | 30% |
 | Max deployed | 100% | 40% | 60% | 80% |
 | Daily halt at | −10% | −5% | −10% | −15% |
-| Risk / trade | 5% | 1% | 2% | 3% |
+| Per-entry notional cap | 5% | 1% | 2% | 3% |
 | Min confidence | 0.72 | 0.65 | 0.55 | 0.50 |
 | Min trade | $5 | $10 | $10 | $10 |
 
-**`twenty-usdc`** is tuned for a ~$20 account: it *concentrates* into the single best
-coin (you can't diversify $20 without fees eating you), trades only on strong signals,
-and uses a 3-coin liquid universe. Start conservative once you scale up; earn the right
-to loosen.
+**`twenty-usdc` is a legacy experimental profile, not a live recommendation.**
+With the current 5% per-entry notional cap, a $20 paper book caps an entry at
+$1, below its $5 minimum; it will normally stay flat. Do not raise the cap just
+to force fills. The Render example uses a separate hypothetical $1,000
+conservative PAPER book.
 
 ---
 
-## Pre-flight checklist (before real money)
+## Private PAPER rollout checklist
 
-- [ ] `npm run validate` shows a **robust ✅** strategy on **real** data
-- [ ] Best params persisted (`data/strategy_params.json` exists)
-- [ ] Weeks of **paper** on real data ≈ backtest, drawdown tolerable
-- [ ] Dashboard badge shows **LIVE data**
-- [ ] API key is **trade-only, withdrawals disabled**, IP-allowlisted
-- [ ] Read-only `/api/exchanges/balances` returns your real balances
-- [ ] `.env` uses **conservative** caps; deposit is a **tiny** stake
-- [ ] `DASHBOARD_PASSWORD` set (dashboard is exposed to the internet)
-- [ ] You know the kill switch and have tested the daily-drawdown halt
-- [ ] You've decided, in advance, the loss level at which you stop entirely
+- [ ] `npm test` passes (offline code checks; it is not an exchange certification)
+- [ ] `DASHBOARD_PASSWORD` and a stable random `SESSION_SECRET` are configured
+- [ ] HTTPS and an access restriction (VPN/IP allowlist/private network) are in place
+- [ ] `TRADING_MODE=PAPER`, `LIVE_TRADING_ENABLED=false`, and on-chain swaps remain off
+- [ ] No trade-enabled API keys are shared with testers; read-only keys only if necessary
+- [ ] The dashboard shows fresh `DATA: LIVE` for every tracked symbol before evaluating results
+- [ ] `GET /api/live/readiness` is visible and its live blockers are not bypassed
+- [ ] Testers understand all users of one instance share the same book, keys, controls, and logs
+- [ ] Paper fills, costs, drawdown, restarts, and feed failures are monitored
+
+This checklist is for a controlled PAPER trial only. It is not a pre-flight for real money.
 
 ---
 
@@ -190,7 +165,7 @@ to loosen.
 ```bash
 npm run validate                 # which strategy is actually robust?
 node scripts/optimize.js momentum 800   # tune + persist best params
-npm test                         # 20-check self-test
+npm test                         # offline self-test
 npm run docker:up                # deploy (Docker)
 npm run docker:logs              # tail logs
 curl -X POST localhost:3000/api/engine/stop     # pause trading

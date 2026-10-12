@@ -19,11 +19,16 @@ const path = require("path");
       if (idx === -1) continue;
       const key = trimmed.slice(0, idx).trim();
       let val = trimmed.slice(idx + 1).trim();
-      if (
-        (val.startsWith('"') && val.endsWith('"')) ||
-        (val.startsWith("'") && val.endsWith("'"))
-      ) {
-        val = val.slice(1, -1);
+      // Support the inline comments used by the shipped .env presets without
+      // corrupting quoted values that themselves contain a # character.
+      const quote = val[0] === '"' || val[0] === "'" ? val[0] : null;
+      if (quote) {
+        const closing = val.indexOf(quote, 1);
+        if (closing > 0 && (!val.slice(closing + 1).trim() || val.slice(closing + 1).trim().startsWith("#"))) {
+          val = val.slice(1, closing);
+        }
+      } else {
+        val = val.replace(/\s+#.*$/, "").trim();
       }
       if (process.env[key] === undefined) process.env[key] = val;
     }
@@ -63,7 +68,8 @@ const config = {
     onFills: bool(process.env.ALERT_ON_FILLS, true),
   },
 
-  mode: (process.env.TRADING_MODE || "PAPER").toUpperCase(),
+  // MODE is accepted as a legacy alias used by the bundled risk presets.
+  mode: (process.env.TRADING_MODE || process.env.MODE || "PAPER").toUpperCase(),
   liveTradingEnabled: bool(process.env.LIVE_TRADING_ENABLED, false),
   liveTradingConfirm: process.env.LIVE_TRADING_CONFIRM || "",
   useTestnet: bool(process.env.USE_TESTNET, true),
@@ -79,6 +85,9 @@ const config = {
     // instant drawdown recovers back under this threshold. Default 5%,
     // i.e. half of the default 10% hard threshold.
     softBrakeDrawdownPct: num(process.env.SOFT_BRAKE_DRAWDOWN_PCT, 0.05),
+    // Maximum notional for a single entry as a fraction of equity. This is
+    // an exposure cap, NOT a true loss-at-risk estimate (there is no
+    // exchange-native stop-loss attached to spot orders).
     perTradeRiskPct: num(process.env.PER_TRADE_RISK_PCT, 0.02),
     minSignalConfidence: num(process.env.MIN_SIGNAL_CONFIDENCE, 0.55),
     // Fee-aware floor: never place a trade smaller than this many USD.
@@ -276,27 +285,41 @@ config.roundTripFeePct = function roundTripFeePct(venue) {
   return f ? (f.taker * 2) : 1.2;
 };
 
-// ---- Runtime live-arming (the "one-click arm" from the dashboard) ----
-// Default OFF. Persisted to data/live_arm.json so a redeploy keeps the
-// operator's intent; can be disarmed instantly (kill switch). Requires the
-// exact confirmation phrase to arm.
+// ---- Runtime live-arming (the additional dashboard confirmation) ----
+// Every live session must satisfy the three deployment locks AND receive a
+// fresh, in-process operator confirmation. The JSON file is diagnostic only:
+// an armed state is NEVER restored after restart, so a reboot always returns
+// the system to PAPER until an operator deliberately arms again.
 const ARM_PATH = path.join(__dirname, "data", "live_arm.json");
 const ARM_PHRASE = "I ACCEPT THE RISK";
-config.arming = { armed: false, armedAt: null };
+config.arming = { armed: false, armedAt: null, rearmRequired: false };
 (function loadArm() {
   try {
-    const s = JSON.parse(fs.readFileSync(ARM_PATH, "utf8"));
-    if (s && s.armed === true) config.arming = s;
+    const saved = JSON.parse(fs.readFileSync(ARM_PATH, "utf8"));
+    if (saved && saved.armed === true) config.arming.rearmRequired = true;
   } catch (_) {
-    /* no persisted arm state -> stays OFF */
+    /* no prior arm state -> stays OFF */
   }
 })();
 
+config.liveGateConfigured = function liveGateConfigured() {
+  return (
+    config.mode === "LIVE" &&
+    config.liveTradingEnabled === true &&
+    config.liveTradingConfirm === ARM_PHRASE
+  );
+};
+
 config.armLive = function armLive(confirm) {
+  if (!config.liveGateConfigured()) {
+    throw new Error(
+      "Live deployment locks are not satisfied: set TRADING_MODE=LIVE, LIVE_TRADING_ENABLED=true, and the exact LIVE_TRADING_CONFIRM phrase."
+    );
+  }
   if (confirm !== ARM_PHRASE) {
     throw new Error(`confirmation phrase must be exactly: ${ARM_PHRASE}`);
   }
-  config.arming = { armed: true, armedAt: Date.now() };
+  config.arming = { armed: true, armedAt: Date.now(), rearmRequired: false };
   try {
     fs.mkdirSync(path.dirname(ARM_PATH), { recursive: true });
     fs.writeFileSync(ARM_PATH, JSON.stringify(config.arming, null, 2), { mode: 0o600 });
@@ -305,34 +328,28 @@ config.armLive = function armLive(confirm) {
 };
 
 config.disarmLive = function disarmLive() {
-  config.arming = { armed: false, armedAt: null, disarmedAt: Date.now() };
+  config.arming = { armed: false, armedAt: null, disarmedAt: Date.now(), rearmRequired: false };
   try {
+    fs.mkdirSync(path.dirname(ARM_PATH), { recursive: true });
     fs.writeFileSync(ARM_PATH, JSON.stringify(config.arming, null, 2), { mode: 0o600 });
   } catch (_) {}
   return config.arming;
 };
 
 config.canTradeLive = function canTradeLive() {
-  // Two independent ways to arm, both requiring the confirmation phrase:
-  //  1) Infra opt-in via .env (MODE=LIVE + LIVE_TRADING_ENABLED + confirm)
-  //  2) Runtime web arm from the Connections page (config.arming.armed)
-  const envArmed =
-    config.mode === "LIVE" &&
-    config.liveTradingEnabled === true &&
-    config.liveTradingConfirm === ARM_PHRASE;
-  return envArmed || config.arming.armed === true;
+  // The deployment locks are necessary, not an alternative to the dashboard
+  // confirmation. A persisted arm or a UI confirmation alone cannot bypass
+  // TRADING_MODE / LIVE_TRADING_ENABLED / LIVE_TRADING_CONFIRM.
+  return config.liveGateConfigured() && config.arming.armed === true;
 };
 
 config.liveStatus = function liveStatus() {
   return {
     canTradeLive: config.canTradeLive(),
-    armPhrase: ARM_PHRASE,
+    deploymentGateOpen: config.liveGateConfigured(),
     webArmed: config.arming.armed === true,
     armedAt: config.arming.armedAt || null,
-    envArmed:
-      config.mode === "LIVE" &&
-      config.liveTradingEnabled === true &&
-      config.liveTradingConfirm === ARM_PHRASE,
+    rearmRequired: config.arming.rearmRequired === true,
     useTestnet: config.useTestnet,
     primary: config.exchanges.primary,
     mode: config.mode,

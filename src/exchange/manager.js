@@ -40,6 +40,9 @@ class ExchangeManager {
       );
     }
     this.status = {};
+    // Read-only balance verification is tracked separately from public
+    // reachability and from merely having key strings configured.
+    this.balanceVerifiedAt = {};
 
     // Apply any credentials saved at runtime via the Connections page.
     // These override blank env vars but don't clobber ones already set.
@@ -59,6 +62,7 @@ class ExchangeManager {
   async connect(venueName, creds = {}) {
     const v = this.venues[venueName];
     if (!v) throw new Error(`unknown venue ${venueName}`);
+    delete this.balanceVerifiedAt[venueName];
     v.setCredentials(creds);
     credStore.set(venueName, creds);
     const result = { venue: venueName, saved: true, reachable: false, balancesOk: false, error: null };
@@ -73,6 +77,7 @@ class ExchangeManager {
         const b = await v.getBalances();
         result.balancesOk = Array.isArray(b.balances);
         result.balances = b.balances;
+        if (result.balancesOk) this.balanceVerifiedAt[venueName] = Date.now();
       }
     } catch (e) {
       result.error = `${result.error ? result.error + "; " : ""}balances: ${e.message}`;
@@ -86,11 +91,20 @@ class ExchangeManager {
     if (!v) throw new Error(`unknown venue ${venueName}`);
     v.setCredentials({ key: "", secret: "", passphrase: "" });
     credStore.remove(venueName);
+    delete this.balanceVerifiedAt[venueName];
     return { venue: venueName, disconnected: true };
   }
 
   getPrimary() {
     return this.venues[this.primary] || this.venues.coinbase;
+  }
+
+  getBalanceVerification(venueName, maxAgeMs = 5 * 60 * 1000) {
+    const verifiedAt = this.balanceVerifiedAt[venueName] || null;
+    return {
+      verifiedAt,
+      verified: Boolean(verifiedAt && Date.now() - verifiedAt <= maxAgeMs),
+    };
   }
 
   async healthCheck() {
@@ -112,8 +126,18 @@ class ExchangeManager {
   async getBalances(venueName) {
     const v = this.venues[venueName || this.primary];
     if (!v) throw new Error(`unknown venue ${venueName}`);
-    if (!v.hasCredentials()) return { venue: v.name, balances: [], note: "no API keys configured" };
-    return v.getBalances();
+    if (!v.hasCredentials()) {
+      delete this.balanceVerifiedAt[v.name];
+      return { venue: v.name, balances: [], note: "no API keys configured" };
+    }
+    try {
+      const result = await v.getBalances();
+      if (Array.isArray(result.balances)) this.balanceVerifiedAt[v.name] = Date.now();
+      return result;
+    } catch (e) {
+      delete this.balanceVerifiedAt[v.name];
+      throw e;
+    }
   }
 
   /**
@@ -125,12 +149,15 @@ class ExchangeManager {
     await Promise.all(
       Object.entries(this.venues).map(async ([name, v]) => {
         if (!v.hasCredentials()) {
+          delete this.balanceVerifiedAt[name];
           out[name] = { venue: name, balances: [], note: "no API keys configured" };
           return;
         }
         try {
           out[name] = await v.getBalances();
+          if (Array.isArray(out[name].balances)) this.balanceVerifiedAt[name] = Date.now();
         } catch (e) {
+          delete this.balanceVerifiedAt[name];
           out[name] = { venue: name, balances: [], error: e.message };
         }
       })
@@ -183,6 +210,7 @@ class ExchangeManager {
           k,
           {
             hasCredentials: v.hasCredentials(),
+            balanceVerification: this.getBalanceVerification(k),
             fees: this.config.venueFees[k] || null,
             ...(this.status[k] || {}),
           },

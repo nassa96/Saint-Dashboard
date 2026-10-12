@@ -72,16 +72,18 @@ Caddy auto-provisions TLS. The dashboard's WebSocket (`/ws`) works through
 `reverse_proxy` unchanged. Nginx works too — just enable `Upgrade`/`Connection`
 headers for `/ws`.
 
-> ⚠️ This dashboard has **no authentication**. Do not expose it to the public
-> internet without a proxy that adds auth (Caddy `basic_auth`, Cloudflare
-> Access, a VPN, or an IP allowlist) — especially once live trading is armed.
+> ⚠️ App authentication is disabled until `DASHBOARD_PASSWORD` is set. For any
+> shared or network-accessible instance, set a strong password and stable
+> `SESSION_SECRET`, terminate HTTPS at the reverse proxy, and add a VPN/IP
+> allowlist or equivalent access restriction. Live funds are not ready in this
+> release; see `LIVE_READINESS.md`.
 
 ---
 
-## Post-deploy checklist
+## Post-deploy PAPER checklist
 
-1. `curl http://YOUR_HOST:3000/api/health` → `"dataSource":"LIVE"`.
-2. Watch PAPER performance and run `/api/backtest` on real candles.
-3. Add exchange API keys (read-only first) → check `/api/exchanges/balances`.
-4. Only then consider arming live trading per `SAFETY.md`.
-5. Keep `.env` off version control (already gitignored) and back it up securely.
+1. `curl http://YOUR_HOST:3000/api/health` → check whether the feed reports `LIVE` (each symbol must also be fresh).
+2. Set authentication, stable `SESSION_SECRET`, HTTPS, and a private access layer before sharing the dashboard.
+3. Watch PAPER performance and run validation/backtests on real candles.
+4. Do not configure trade-enabled keys or attempt live arming. Check `/api/live/readiness` and `LIVE_READINESS.md`; the current release is NO-GO for live funds.
+5. Keep `.env` and the `data/` directory (including saved credentials) off version control and protect backups.

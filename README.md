@@ -5,9 +5,11 @@ transparent multi-indicator signal engine, capital-allocation / rotation logic,
 a memecoin detection radar, and **hard-gated** live execution across centralized
 exchanges — with a realistic paper-trading engine running safely by default.
 
-> ⚠️ **Read `SAFETY.md` before enabling live trading.** This software can place
-> real orders with real money once armed. It is provided as-is, is **not
-> financial advice**, and you are solely responsible for any funds you connect.
+> ⚠️ **Current release status: PAPER-only; not ready for live funds.** The live
+> arm endpoint remains locked while exchange reconciliation and order recovery
+> are incomplete. Review [`LIVE_READINESS.md`](LIVE_READINESS.md) and
+> [`SAFETY.md`](SAFETY.md). No strategy can promise profit; this is not financial
+> advice.
 
 ---
 
@@ -47,7 +49,7 @@ v2 replaces that core with real, working machinery:
 | Yield strategies | none | + **DNFH (delta-neutral funding harvest)** — real long-spot(Base)/short-perp(HyperLiquid) funding-rate capture, net exposure ~0. Manual/gated only (`GET /api/dnfh/scan`, `POST /api/dnfh/plan`, `POST /api/dnfh/execute`), hard-capped leverage, never guesses a token contract address, never auto-unwinds a partial fill silently — see `VENUES.md` |
 | Risk sizing | flat per-symbol/portfolio caps | + **Volatility-regime-aware sizing** — the Extreme Volatility Radar now actually throttles risk instead of just alerting: position size shrinks and the confidence bar rises automatically in ELEVATED/EXTREME regimes (`src/risk/riskManager.js`) |
 | Circuit breakers | daily-drawdown halt only | + **Market-wide stress halt** — pauses NEW entries (exits always still run) if too much of the tracked universe is simultaneously reading EXTREME volatility at once; auto-clears the same day once it passes, independent of the (sticky-for-the-day) drawdown breaker |
-| Live-data safety | none | + **Non-LIVE price gate** — even fully armed, the engine refuses to place a real order against a symbol whose current tick came from the SIM fallback (feed unreachable) rather than a genuine live quote; falls back to the paper ledger instead of trading on a fabricated price |
+| Live-data safety | none | + **Fresh-quote gate** — PAPER skips fills on SIM/missing/stale quotes; an armed live order latches a fail-closed halt; neither path turns an unsafe quote into a fill |
 | Macro overlay | none | + **Risk-appetite overlay** — Fear & Greed Index + global market-cap trend (`src/intelligence/flow.js`, `GET /api/intelligence/flow`), bounded so it can only ever *shrink* deployed capital in a risk-off backdrop, never push exposure above your configured `MAX_PORTFOLIO_RISK_PCT` |
 
 ### Extreme Volatility Radar (honest read)
@@ -93,6 +95,8 @@ running the server cannot reach the exchange/DEX APIs (e.g. a locked-down cloud
 sandbox), the system transparently falls back to **clearly-labeled simulated
 data** so the dashboard stays functional — and automatically switches to real
 **LIVE** data the moment it runs somewhere with outbound internet (your PC/VPS).
+PAPER mode skips fills while quotes are SIM, missing, or stale; those synthetic
+prices are for dashboard/UI smoke checks only and are not strategy evidence.
 
 ---
 
@@ -102,14 +106,14 @@ data** so the dashboard stays functional — and automatically switches to real
 npm install
 cp .env.example .env      # edit as needed (safe defaults are fine to start)
 npm start                 # http://localhost:3000
-npm test                  # offline self-test of the full pipeline (20 checks)
+npm test                  # offline self-test of the full pipeline
 npm run validate          # walk-forward every strategy → robust YES/NO verdict
 npm run backtest          # backtest the strategy (real candles when online)
 ```
 
-> 💰 **Going live with real money? Start with [`LAUNCH.md`](LAUNCH.md)** — a staged
-> runbook (validate → paper → tiny live → scale) with risk presets in `presets/`
-> and a pre-flight checklist. It's built to keep you from blowing up.
+> **Testing the product?** Use [`LAUNCH.md`](LAUNCH.md) for the controlled
+> PAPER rollout checklist. [`LIVE_READINESS.md`](LIVE_READINESS.md) records the
+> live-funds NO-GO verdict, fixes, and remaining blockers.
 >
 > 🌐 **Running across multiple exchanges?** See [`VENUES.md`](VENUES.md) — venue
 > fees, aggregated balances, fee-aware sizing, and how to add new venues.
@@ -136,7 +140,7 @@ server.js ──► src/engine/engine.js  (the loop)
                  ├─ src/volatility/predictor.js Extreme Volatility Radar (EWMA/realized vol, squeeze, regime)
                  ├─ src/risk/riskManager.js     caps, exposure, drawdown breaker
                  ├─ src/portfolio/allocator.js  conviction-weighted rotation targets
-                 ├─ src/paper/broker.js         simulated fills @ real prices (default)
+                 ├─ src/paper/broker.js         simulated fills only on fresh LIVE public quotes
                  ├─ src/exchange/manager.js     ONLY choke-point for CEX live orders
                  │     ├─ binanceus.js  coinbase.js  kraken.js  (signed REST)
                  ├─ src/wallet/manager.js       ONLY choke-point for on-chain swaps
@@ -159,9 +163,9 @@ public/connect.html ─── connect exchanges + view wallet status (Connection
 - `GET  /api/exchanges/balances/all` — aggregated balances across every venue + fees
 - `POST /api/exchanges/connect` — save + verify venue keys `{venue,key,secret,passphrase?}` (read-only test)
 - `POST /api/exchanges/disconnect` — remove saved venue keys `{venue}`
-- `GET  /api/live/status` — live-arming status (armed?, testnet?, auth?, connected?)
-- `POST /api/live/arm` — arm live trading `{confirm:"I ACCEPT THE RISK"}` (refused unless primary venue connected)
-- `POST /api/live/disarm` — instant kill switch back to PAPER
+- `GET  /api/live/status` / `GET /api/live/readiness` — live gate status and a detailed go/no-go audit
+- `POST /api/live/arm` — currently **refuses live arming** until all code and operator readiness checks pass
+- `POST /api/live/disarm` — closes the runtime arm; `POST /api/engine/stop` also disarms
 - `GET  /api/wallet/status` — on-chain wallet status (armed?, addresses)
 - `POST /api/wallet/quote` — read-only swap quote `{chain, tokenAddress, usd}`
 - `POST /api/wallet/swap` — **gated** real swap (refused unless armed)
@@ -239,19 +243,14 @@ pushed a message on every fill and whenever a **non-simulated** memecoin scores
 
 ---
 
-## Going live (only when you're ready)
+## Live funds status
 
-See **`SAFETY.md`** for the full checklist. In short, live orders require **all
-three** of these to be set — defense in depth:
-
-```env
-TRADING_MODE=LIVE
-LIVE_TRADING_ENABLED=true
-LIVE_TRADING_CONFIRM=I ACCEPT THE RISK
-```
-
-Until every one of those is set exactly, `ExchangeManager.routeLiveOrder()`
-refuses to send anything and the engine uses the paper ledger.
+**Live trading is not ready in this release.** The dashboard/API arm path is
+intentionally blocked by missing account reconciliation, final-fill/timeout
+recovery, and exchange-side position protection. See `LIVE_READINESS.md` and
+`SAFETY.md`; use PAPER for the controlled test rollout. A connected or
+balance-verified API key does not prove trade permissions or live execution
+readiness.
 
 ## Configuration
 All tunables live in `.env` (see `.env.example`): capital size, position/

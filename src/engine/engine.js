@@ -57,6 +57,12 @@ class Engine {
 
     this.cycle = 0;
     this.running = false;
+    this._tickInFlight = false;
+    this.skippedTicks = 0;
+    this._startGeneration = 0;
+    this._stoppedByOperator = false;
+    this._unsafePaperQuoteWarnings = {};
+    this.liveExecutionFault = null;
     this.lastTick = null;
     this.lastEvaluations = [];
     this.lastTargets = {};
@@ -108,8 +114,30 @@ class Engine {
   }
 
   async tick() {
+    // A manual tick must not restart work after the operator has stopped the
+    // engine; a later explicit start resets this latch.
+    if (this._stoppedByOperator) return this.snapshot();
+    // Interval ticks, manual API ticks, and slow network calls must never
+    // overlap: doing so can size duplicate orders from the same old exposure.
+    if (this._tickInFlight) {
+      this.skippedTicks++;
+      return this.snapshot();
+    }
+    this._tickInFlight = true;
+    const startGeneration = this._startGeneration || 0;
+    try {
+      return await this._runTick(startGeneration);
+    } finally {
+      this._tickInFlight = false;
+    }
+  }
+
+  async _runTick(startGeneration = this._startGeneration || 0) {
     this.cycle++;
     await this.market.refresh();
+    // Stop/restart while market I/O was pending invalidates this tick, even if
+    // a later start has already cleared the operator-stop latch.
+    if (this._stoppedByOperator || startGeneration !== this._startGeneration) return this.snapshot();
     const prices = this.prices();
 
     // Pre-compute equity/exposure BEFORE evaluating signals so inventory-aware
@@ -164,7 +192,7 @@ class Engine {
     // cash — a halt alone only blocks NEW entries, it doesn't do anything
     // about existing exposure still sitting in the drawdown.
     if (this.risk.justTriggeredHardHalt) {
-      const flattened = await this._flattenAll(prices);
+      const flattened = await this._flattenAll(prices, startGeneration);
       if (flattened.length) {
         log.warn("ENGINE", `AEGIS HARD KILLSWITCH: flattened ${flattened.length} position(s) to cash — ${this.risk.haltReason}`);
         this.notifier.notifyHalt?.(this.risk.haltReason, flattened);
@@ -205,7 +233,7 @@ class Engine {
         const notional = Math.min(diff, assessment.maxNotional, this.paper.cash);
         // Fee-aware floor: skip trades too small to survive fees + minimums.
         if (notional >= minTradeUsd) {
-          const fill = await this._execute({ symbol: ev.symbol, side: "BUY", notional, price, tag: ev.pool });
+          const fill = await this._execute({ symbol: ev.symbol, side: "BUY", notional, price, tag: ev.pool, startGeneration });
           if (fill) actions.push({ symbol: ev.symbol, intent: "BUY", fill });
         } else if (notional > 0) {
           actions.push({ symbol: ev.symbol, intent: "BUY", skipped: `below min trade $${minTradeUsd}` });
@@ -215,7 +243,7 @@ class Engine {
         const notional = Math.min(-diff, currentNotional);
         // Allow small SELLs only if they close the position (avoid fee-dust dust).
         if (notional >= minTradeUsd || notional >= currentNotional - 1e-9) {
-          const fill = await this._execute({ symbol: ev.symbol, side: "SELL", notional, price, tag: ev.pool });
+          const fill = await this._execute({ symbol: ev.symbol, side: "SELL", notional, price, tag: ev.pool, startGeneration });
           if (fill) actions.push({ symbol: ev.symbol, intent: "SELL", fill });
         }
       }
@@ -251,52 +279,71 @@ class Engine {
   }
 
   /**
-   * Aegis hard-killswitch response: sell every open paper position down to
-   * cash, right now. Reuses the existing SELL execution path (same fees/
-   * slippage model, same fill recording) — this is not a special "panic"
-   * code path, just the normal rotation-out logic applied to everything at
-   * once. Only operates on the paper ledger; live trading is already
-   * blocked the moment this.risk.halted is true (assess() refuses all new
-   * BUYs), and this app never auto-places live SELL orders unattended.
+   * Aegis hard-halt response: flatten the local paper positions through the
+   * normal SELL path. This does not inspect or close venue positions. The
+   * live readiness gate therefore blocks live funds; never treat this local
+   * ledger operation as an exchange-side panic/stop order.
    */
-  async _flattenAll(prices) {
+  async _flattenAll(prices, startGeneration) {
     const flattened = [];
     for (const [symbol, pos] of Object.entries({ ...this.paper.positions })) {
       const price = prices[symbol]?.price;
       if (!price || !(pos.qty > 0)) continue;
       const notional = pos.qty * price;
-      const fill = await this._execute({ symbol, side: "SELL", notional, price, tag: "aegis-flatten" });
+      const fill = await this._execute({ symbol, side: "SELL", notional, price, tag: "aegis-flatten", startGeneration });
       if (fill) flattened.push({ symbol, fill });
     }
     return flattened;
   }
 
-  async _execute({ symbol, side, notional, price, tag }) {
-    // PAPER path (default & safe)
-    if (!this.config.canTradeLive()) {
+  async _execute({ symbol, side, notional, price, tag, startGeneration }) {
+    // Do not let a tick already waiting on I/O create activity after an
+    // operator stop, including if a later restart clears the stop latch.
+    // stop() cannot cancel an order already accepted by a venue; that
+    // limitation is reported separately in the UI/docs.
+    if (this._stoppedByOperator || (startGeneration !== undefined && startGeneration !== this._startGeneration)) return null;
+    // A live error/ambiguous acknowledgement is fail-closed for this process.
+    // Never convert an uncertain real order into a synthetic paper fill.
+    if (this.liveExecutionFault) return null;
+
+    const liveOrder = this.config.canTradeLive();
+    const tick = this.market?.latest?.[symbol];
+    const dataSource = tick?.source || "UNKNOWN";
+    const priceAgeMs = tick?.ts ? Date.now() - tick.ts : Infinity;
+    const validQuote =
+      dataSource === "LIVE" &&
+      priceAgeMs >= 0 && priceAgeMs <= 30_000 &&
+      Number.isFinite(price) && price > 0;
+
+    // Never make a fill from synthetic, missing, or stale pricing. In PAPER
+    // this quietly skips activity (and is throttled in logs); in LIVE it is a
+    // safety halt because a bad quote must not reach the venue.
+    if (!validQuote) {
+      const quoteDetail = `source=${dataSource}, age=${Number.isFinite(priceAgeMs) ? `${priceAgeMs}ms` : "unknown"}, price=${price}`;
+      if (liveOrder) {
+        this._haltLiveExecution(
+          symbol,
+          side,
+          `Refused live order: quote ${quoteDetail}. Reconcile exchange state before any restart.`,
+        );
+      } else {
+        const lastWarnedAt = this._unsafePaperQuoteWarnings?.[symbol] || 0;
+        if (Date.now() - lastWarnedAt >= 60_000) {
+          if (this._unsafePaperQuoteWarnings) this._unsafePaperQuoteWarnings[symbol] = Date.now();
+          log.warn("ENGINE", `Skipped PAPER fill: unsafe quote ${quoteDetail}; waiting for a fresh LIVE market quote.`);
+        }
+      }
+      return null;
+    }
+
+    // PAPER path (default & safe; only reached with a fresh, real public quote)
+    if (!liveOrder) {
       const fill = this.paper.execute({ symbol, side, notional, price, tag });
       if (fill) this.notifier.notifyFill(fill);
       return fill;
     }
 
-    // Survivability gate: NEVER risk real money off a fabricated/stale
-    // price. If this symbol's current tick came from the SIM fallback (feed
-    // unreachable) rather than a real LIVE quote, refuse the live order and
-    // fall back to the paper ledger so the engine keeps running instead of
-    // silently trading on made-up numbers.
-    const dataSource = this.market.latest[symbol]?.source;
-    if (dataSource !== "LIVE") {
-      log.error(
-        "ENGINE",
-        `REFUSED live ${side} ${symbol}: price source is "${dataSource || "UNKNOWN"}", not LIVE — ` +
-          "will not place a real order against simulated/stale data. Falling back to paper fill."
-      );
-      const fill = this.paper.execute({ symbol, side, notional, price, tag });
-      if (fill) this.notifier.notifyFill({ ...fill, note: `LIVE blocked: price source was ${dataSource || "UNKNOWN"}, not LIVE` });
-      return fill;
-    }
-
-    // LIVE path (only reachable when fully armed AND data is confirmed LIVE)
+    // LIVE path (only reachable when all server-side arm checks have passed)
     try {
       const venue = this.exchanges.primary;
       const venueSymbol = this._venueSymbol(symbol, venue);
@@ -305,18 +352,44 @@ class Engine {
           ? { symbol: venueSymbol, side, quoteOrderQty: notional.toFixed(2) }
           : { symbol: venueSymbol, side, quantity: (notional / price).toFixed(8) };
       const result = await this.exchanges.routeLiveOrder(order, venue);
-      log.warn("ENGINE", `LIVE fill ${side} ${symbol}: ${result.status}`);
-      // Mirror into paper ledger so equity/positions stay coherent in the UI
+      if (result?.fillConfirmed !== true) {
+        throw new Error(
+          `Exchange returned ${result?.status || "an unknown acknowledgement"}, not a reconciled fill. The order may be open, partial, or filled; inspect the venue before resuming.`,
+        );
+      }
+      log.warn("ENGINE", `LIVE fill confirmed ${side} ${symbol}: ${result.status}`);
+      // Mirror only a confirmed fill. This ledger remains a UI mirror, not
+      // authoritative exchange state; the readiness gate blocks live trading
+      // until full account and position reconciliation is implemented.
       const mirror = this.paper.execute({ symbol, side, notional, price, tag });
+      if (!mirror) throw new Error("Confirmed exchange fill could not be mirrored into the local ledger");
       const fill = { ...mirror, mode: "LIVE", venue, raw: result.raw };
       this.notifier.notifyFill(fill);
       return fill;
     } catch (e) {
-      log.error("ENGINE", `LIVE order failed, falling back to paper ledger: ${e.message}`);
-      const fill = this.paper.execute({ symbol, side, notional, price, tag });
-      if (fill) this.notifier.notifyFill(fill);
-      return fill;
+      this._haltLiveExecution(symbol, side, e.message);
+      return null;
     }
+  }
+
+  _haltLiveExecution(symbol, side, message) {
+    if (!this.liveExecutionFault) {
+      this.liveExecutionFault = {
+        at: new Date().toISOString(),
+        symbol,
+        side,
+        status: "UNKNOWN — MANUAL RECONCILIATION REQUIRED",
+        message: String(message || "live execution failed"),
+      };
+      log.error("ENGINE", `LIVE SAFETY HALT: ${this.liveExecutionFault.message}`);
+    }
+    this.config.disarmLive?.();
+    this.running = false;
+    clearInterval(this._loop);
+    clearInterval(this._scanLoop);
+    clearInterval(this._macroLoop);
+    clearInterval(this._barsLoop);
+    clearInterval(this._dnfhEpochLoop);
   }
 
   _venueSymbol(symbol, venue) {
@@ -329,7 +402,13 @@ class Engine {
 
   async start(intervalMs = 5000) {
     if (this.running) return;
+    if (this.liveExecutionFault) {
+      log.error("ENGINE", "Start refused: unresolved live execution fault requires manual exchange reconciliation and a process review.");
+      return;
+    }
+    const startGeneration = ++this._startGeneration;
     this.running = true;
+    this._stoppedByOperator = false;
     log.info("ENGINE", `Started — mode=${this.config.mode} liveArmed=${this.config.canTradeLive()} interval=${intervalMs}ms`);
     // Warm up indicator history before the first real tick
     try {
@@ -337,6 +416,9 @@ class Engine {
     } catch (e) {
       log.warn("ENGINE", `warmup skipped: ${e.message}`);
     }
+    // stop() can be called while warmup is waiting on slow network requests.
+    // Do not resurrect timers after the operator has stopped the engine.
+    if (!this.running || startGeneration !== this._startGeneration) return;
     this._loop = setInterval(() => {
       this.tick().catch((e) => log.error("ENGINE", `tick error: ${e.message}`));
     }, intervalMs);
@@ -377,12 +459,17 @@ class Engine {
 
   stop() {
     this.running = false;
+    this._stoppedByOperator = true;
+    this._startGeneration = (this._startGeneration || 0) + 1;
     clearInterval(this._loop);
     clearInterval(this._scanLoop);
     clearInterval(this._macroLoop);
     clearInterval(this._barsLoop);
     clearInterval(this._dnfhEpochLoop);
-    log.info("ENGINE", "Stopped");
+    // Stop is the operator-facing emergency pause, so it also closes the
+    // runtime live arm; a restart will not automatically resume real orders.
+    this.config.disarmLive?.();
+    log.warn("ENGINE", "Stopped and live routing disarmed");
   }
 
   snapshot() {
@@ -392,8 +479,11 @@ class Engine {
       ts: Date.now(),
       running: this.running,
       cycle: this.cycle,
+      tickInFlight: this._tickInFlight,
+      skippedTicks: this.skippedTicks,
       mode: this.config.mode,
       liveArmed: this.config.canTradeLive(),
+      liveExecutionFault: this.liveExecutionFault,
       dataSource: this.market.source,
       strategy: {
         active: this.config.strategy,

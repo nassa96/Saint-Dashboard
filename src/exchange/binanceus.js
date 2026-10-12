@@ -54,7 +54,13 @@ class BinanceUS extends BaseExchange {
       timeout: 8000,
     });
     if (!res.ok) throw new Error(`order HTTP ${res.status}: ${res.text?.slice(0, 160)}`);
-    return { venue: this.name, raw: res.json, status: res.json.status };
+    return {
+      venue: this.name,
+      raw: res.json,
+      orderId: res.json.orderId,
+      status: res.json.status,
+      fillConfirmed: res.json.status === "FILLED",
+    };
   }
 }
 
